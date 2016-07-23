@@ -61,4 +61,22 @@ struct fat32 {
 	uint16_t bsig;
 } __attribute__((packed));
 
+#define F_READ_ONLY 1
+#define F_HIDDEN 2
+#define F_SYSTEM 4
+#define F_VOLUME_ID 8
+#define F_DIRECTORY 0x10
+#define F_ARCHIVE 0x20
+#define F_LFN (F_READ_ONLY|F_HIDDEN|F_SYSTEM|F_VOLUME_ID)
+
+struct fat_entry {
+	char name[11];
+	uint8_t attr, nt, ctime2;
+	uint16_t ctime, cdate, atime;
+	uint16_t clhigh;
+	uint16_t mtime, mdate;
+	uint16_t cllow;
+	uint32_t size;
+} __attribute__((packed));
+
 #endif

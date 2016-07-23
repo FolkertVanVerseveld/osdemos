@@ -10,6 +10,7 @@
 #include "fat.h"
 
 #define MBR_SIZE 512
+#define SECTORSZ 512
 
 struct md {
 	uint8_t val;
@@ -48,6 +49,7 @@ static struct vfat {
 	uint32_t nsec, sfat, ndir;
 	uint32_t data, ndata, nclus;
 	uint16_t fati;
+	uint32_t root;
 	unsigned fstype;
 	unsigned md_i;
 } fs = {
@@ -133,6 +135,7 @@ static void fat_map(struct vfat *this)
 		fstype = FS_FAT32;
 	this->nclus = nclus;
 	this->fstype = fstype;
+	this->root = fstype == FS_FAT12 || fstype == FS_FAT16 ? this->data - this->ndir : this->e32->rootno;
 }
 
 static void fat12_stat(const struct fat12 *this)
@@ -222,6 +225,72 @@ static void fat32_stat(const struct fat32 *this)
 	);
 }
 
+static void cluster_stat(const struct vfat *fs)
+{
+	uint16_t sec = fs->bpb->sec;
+	for (unsigned j = 0, i = 0; ; ++i) {
+		uint32_t fat_offset = i + i / 2; // * 1.5
+		if (fat_offset >= SECTORSZ * fs->sfat) {
+			if (j)
+				putchar('\n');
+			break;
+		}
+		uint32_t fat_sector = fs->fati + fat_offset / sec;
+		// wiki uses (char*)fs->map + fat_sector * sec + fat_offset % sec,
+		// but `% sec' should not be necessary
+		uint16_t v = *(uint16_t*)((char*)fs->map + fat_sector * sec + fat_offset);
+		if (i & 1)
+			v >>= 4;
+		else
+			v &= 0xfff;
+		printf("%03hX ", v);
+		j = (j + 1) & 0xf;
+		if (!j)
+			putchar('\n');
+	}
+}
+
+static int root_stat(const struct vfat *fs)
+{
+	uint32_t root = fs->root;
+	char *map = (char*)fs->map + root * SECTORSZ;
+	struct fat_entry *item;
+	unsigned i = 0, max = 0;
+	blksize_t blocks = fs->st.st_blocks;
+	if (root > blocks) {
+		fprintf(stderr, "bad image: blocks=%zu, root=%u\n", (size_t)blocks, root);
+		return 1;
+	}
+	max = (fs->st.st_blocks - root) * 512 / 32;
+	char *pmap;
+	for (pmap = map; *pmap && i < max; pmap += 32, ++i) ;
+	//printf("max: %u, entry count: %u\n", max, i);
+	max = i;
+	printf("root entry count: %u\ncontents:\n", max);
+	char buf[64], fname[12];
+	for (pmap = map, i = 0; i < max; pmap += 32, ++i) {
+		item = (struct fat_entry*)pmap;
+		memcpy(fname, item->name, 11);
+		fname[11] = '\0';
+		unsigned i, ext_ri = 11 - 3 - 1;
+		while (fname[ext_ri] == ' ')
+			--ext_ri;
+		++ext_ri;
+		fname[ext_ri  ] = fname[8];
+		fname[ext_ri+1] = fname[9];
+		fname[ext_ri+2] = fname[10];
+		for (i = 0; i < ext_ri; ++i)
+			buf[i] = fname[i];
+		buf[i++] = '.';
+		buf[i++] = fname[ext_ri];
+		buf[i++] = fname[ext_ri+1];
+		buf[i++] = fname[ext_ri+2];
+		buf[i] = '\0';
+		puts(buf);
+	}
+	return 0;
+}
+
 int main(int argc, char **argv)
 {
 	int ret = 1;
@@ -235,6 +304,14 @@ int main(int argc, char **argv)
 	if (mbr_read(&fs))
 		goto fail;
 	struct bpb *bpb = fs.bpb;
+	if (bpb->sec < MBR_SIZE) {
+		fprintf(stderr, "bad sector size: %hu\n", bpb->sec);
+		goto fail;
+	}
+	if (!bpb->clsec) {
+		fprintf(stderr, "bad cluster size: %hu\n", bpb->clsec);
+		goto fail;
+	}
 	bpb_stat(bpb);
 	fat_map(&fs);
 	if (fs.fstype == FS_FAT12 || fs.fstype == FS_FAT16)
@@ -249,9 +326,10 @@ int main(int argc, char **argv)
 		"data start      : %u\n"
 		"fat start       : %hu\n"
 		"data sectors    : %u\n"
-		"cluster count   : %u\n",
+		"cluster count   : %u\n"
+		"root start      : %u\n",
 		fs.nsec, fs.sfat, fs.ndir,
-		fs.data, fs.fati, fs.ndata, fs.nclus
+		fs.data, fs.fati, fs.ndata, fs.nclus, fs.root
 	);
 	printf("fs type: %s\n", fstbl[fs.fstype]);
 	for (unsigned i = 0; i < MDTBLSZ; ++i) {
@@ -270,7 +348,10 @@ int main(int argc, char **argv)
 		}
 	}
 	fputs("bad physical format descriptor\n", stderr);
+	goto fail;
 end:
+	//cluster_stat(&fs);
+	root_stat(&fs);
 	ret = 0;
 fail:
 	cleanup();
