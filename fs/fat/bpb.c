@@ -2,11 +2,14 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <sys/mman.h>
+#include <unistd.h>
 #include "fat.h"
 
 #define MBR_SIZE 512
-
-static FILE *file = NULL;
 
 struct md {
 	uint8_t val;
@@ -34,37 +37,128 @@ static const struct md mdtbl[] = {
 #define MDTBLSZ (sizeof(mdtbl)/(sizeof(mdtbl[0])))
 
 static struct vfat {
-	size_t n;
-	char mbr[MBR_SIZE];
+	int fd;
+	struct stat st;
+	/* data vars */
+	void *map;
 	struct bpb *bpb;
 	struct fat12 *e12;
 	struct fat32 *e32;
-} fs;
+	/* geometry */
+	uint32_t nsec, sfat, ndir;
+	uint32_t data, ndata, nclus;
+	uint16_t fati;
+	unsigned fstype;
+	unsigned md_i;
+} fs = {
+	.fd = -1,
+	.map = MAP_FAILED
+};
 
-static int mbr_read(struct vfat *this, FILE *file)
+static int mbr_open(struct vfat *this, const char *name)
 {
-	int ret = 1;
-	size_t n = fread(this->mbr, 1, MBR_SIZE, file);
-	if (n < sizeof(struct bpb)) {
-		fputs("bad vfat volume\n", stderr);
+	int fd = -1;
+	void *map = MAP_FAILED;
+	fd = open(name, O_RDONLY);
+	if (fd == -1 || fstat(fd, &this->st)) {
+		perror(name);
 		goto fail;
 	}
-	this->n = n;
-	this->bpb = (struct bpb*)this->mbr;
-	ret = 0;
+	this->fd = fd;
+	map = mmap(NULL, this->st.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
+	if (map == MAP_FAILED) {
+		perror("mmap");
+		goto fail;
+	}
+	this->map = map;
+	return 0;
 fail:
-	return ret;
+	if (fd != -1)
+		close(fd);
+	return 1;
+}
+
+static void mbr_close(struct vfat *this)
+{
+	if (this->map != MAP_FAILED) {
+		munmap(this->map, this->st.st_size);
+		this->map = MAP_FAILED;
+	}
+	if (this->fd != -1) {
+		close(this->fd);
+		this->fd = -1;
+	}
 }
 
 static void cleanup(void)
 {
-	if (file) {
-		fclose(file);
-		file = NULL;
-	}
+	mbr_close(&fs);
 }
 
-static void bpb_stat(struct bpb *this)
+static int mbr_read(struct vfat *this)
+{
+	size_t n = this->st.st_size;
+	if (n < sizeof(struct bpb)) {
+		fputs("bad vfat volume\n", stderr);
+		return 1;
+	}
+	if (n < MBR_SIZE) {
+		fputs("bad mbr\n", stderr);
+		return 1;
+	}
+	char *map = this->map;
+	this->bpb = this->map;
+	this->e12 = (struct fat12*)(map + sizeof(struct bpb));
+	this->e32 = (struct fat32*)(map + sizeof(struct bpb));
+	return 0;
+}
+
+static void fat_map(struct vfat *this)
+{
+	const struct bpb *bpb = this->bpb;
+	unsigned fstype = FS_FATE, nclus;
+	this->nsec = bpb->nsec ? bpb->nsec : bpb->nlarge;
+	this->sfat = bpb->sfat ? bpb->sfat : this->e32->sfat;
+	this->ndir = (bpb->ndir * 32 + (bpb->sec - 1)) / bpb->sec;
+	this->data = bpb->sres + (bpb->nfat * this->sfat) + this->ndir;
+	this->fati = bpb->sres;
+	this->ndata = this->nsec - (bpb->sres + (bpb->nfat * this->sfat) + this->ndir);
+	nclus = this->ndata / bpb->clsec;
+	fstype = FS_FATE;
+	if (nclus < 4085)
+		fstype = FS_FAT12;
+	else if (nclus < 65525)
+		fstype = FS_FAT16;
+	else if (nclus < 268435445)
+		fstype = FS_FAT32;
+	this->nclus = nclus;
+	this->fstype = fstype;
+}
+
+static void fat12_stat(const struct fat12 *this)
+{
+	char label[12], sysid[9];
+	strncpy(label, this->label, 12);
+	strncpy(sysid, this->sysid, 9);
+	label[11] = sysid[8] = '\0';
+	printf(
+		"drive number         : %hhu\n"
+		"windows nt flags     : %02hhX\n"
+		"signature            : %02hhX\n"
+		"volume serial ID     : %08X\n"
+		"volume label         : %s\n"
+		"system identifier    : %s\n"
+		"boot record signature: %04hX\n",
+		this->drive,
+		this->nt,
+		this->sig,
+		this->serial,
+		label, sysid,
+		this->bsig
+	);
+}
+
+static void bpb_stat(const struct bpb *this)
 {
 	char oem[9];
 	strncpy(oem, this->oem, 9);
@@ -93,19 +187,38 @@ static void bpb_stat(struct bpb *this)
 		"head count           : %hu\n"
 		"hidden sector count  : %u\n"
 		"large sector count   : %u\n",
-		oem,
-		this->sec,
-		this->clsec,
-		this->sres,
-		this->nfat,
-		this->ndir,
-		this->nsec,
-		this->mdb,
-		this->sfat,
-		this->strack,
-		this->nhead,
-		this->nhidden,
-		this->nlarge
+		oem, this->sec, this->clsec, this->sres,
+		this->nfat, this->ndir, this->nsec, this->mdb,
+		this->sfat, this->strack,
+		this->nhead, this->nhidden, this->nlarge
+	);
+}
+
+static void fat32_stat(const struct fat32 *this)
+{
+	char label[12], sysid[9];
+	strncpy(label, fs.e32->label, 12);
+	strncpy(sysid, fs.e32->sysid, 9);
+	label[11] = sysid[8] = '\0';
+	printf(
+		"fat sector count     : %u\n"
+		"flags                : %hu\n"
+		"version              : %hu\n"
+		"root cluster         : %u\n"
+		"fat info cluster     : %hu\n"
+		"backup cluster       : %hu\n"
+		"reserved[12]\n"
+		"drive number         : %02hhX\n"
+		"windows nt flags     : %02hhX\n"
+		"boot signature       : %02hhX\n"
+		"volume serial ID     : %08X\n"
+		"volume label         : %s\n"
+		"system identifier    : %s\n"
+		"boot record signature: %04hX\n",
+		this->sfat, this->opt, this->ver,
+		this->rootno, this->fsino, this->fsckno,
+		this->drive, this->nt, this->sig,
+		this->serial, label, sysid, this->bsig
 	);
 }
 
@@ -117,86 +230,17 @@ int main(int argc, char **argv)
 		fprintf(stderr, "usage: %s file\n", argc > 0 ? argv[0] : "bpb");
 		goto fail;
 	}
-	file = fopen(argv[1], "rb");
-	if (!file) {
-		perror(argv[1]);
+	if (mbr_open(&fs, argv[1]))
 		goto fail;
-	}
-	if (mbr_read(&fs, file))
+	if (mbr_read(&fs))
 		goto fail;
 	struct bpb *bpb = fs.bpb;
 	bpb_stat(bpb);
-	if (fs.n < MBR_SIZE)
-		goto end;
-	fs.e12 = (struct fat12*)(fs.mbr + sizeof(struct bpb));
-	fs.e32 = (struct fat32*)(fs.mbr + sizeof(struct bpb));
-	char label[12], sysid[9], label2[12], sysid2[9];
-	strncpy(label, fs.e12->label, 12);
-	strncpy(sysid, fs.e12->sysid, 9);
-	label[11] = sysid[8] = '\0';
-	strncpy(label2, fs.e32->label, 12);
-	strncpy(sysid2, fs.e32->sysid, 9);
-	label2[11] = sysid2[8] = '\0';
-	uint32_t nsec, sfat, ndir, data, ndata, nclus;
-	uint16_t fati;
-	nsec = bpb->nsec ? bpb->nsec : bpb->nlarge;
-	sfat = bpb->sfat ? bpb->sfat : fs.e32->sfat;
-	ndir = ((bpb->ndir * 32) + (bpb->sec - 1)) / bpb->sec;
-	data = bpb->sres + (bpb->nfat * sfat) + ndir;
-	fati = bpb->sres;
-	ndata = nsec - (bpb->sres + (bpb->nfat * sfat) + ndir);
-	nclus = ndata / bpb->clsec;
-	unsigned fstype = FS_FATE;
-	if (nclus < 4085)
-		fstype = FS_FAT12;
-	else if (nclus < 65525)
-		fstype = FS_FAT16;
-	else if (nclus < 268435445)
-		fstype = FS_FAT32;
-	if (fstype == FS_FAT12 || fstype == FS_FAT16)
-		printf(
-			"drive number         : %hhu\n"
-			"windows nt flags     : %02hhX\n"
-			"signature            : %02hhX\n"
-			"volume serial ID     : %08X\n"
-			"volume label         : %s\n"
-			"system identifier    : %s\n"
-			"boot record signature: %04hX\n",
-			fs.e12->drive,
-			fs.e12->nt,
-			fs.e12->sig,
-			fs.e12->serial,
-			label, sysid,
-			fs.e12->bsig
-		);
+	fat_map(&fs);
+	if (fs.fstype == FS_FAT12 || fs.fstype == FS_FAT16)
+		fat12_stat(fs.e12);
 	else
-		printf(
-			"fat sector count     : %u\n"
-			"flags                : %hu\n"
-			"version              : %hu\n"
-			"root cluster         : %u\n"
-			"fat info cluster     : %hu\n"
-			"backup cluster       : %hu\n"
-			"reserved[12]\n"
-			"drive number         : %02hhX\n"
-			"windows nt flags     : %02hhX\n"
-			"boot signature       : %02hhX\n"
-			"volume serial ID     : %08X\n"
-			"volume label         : %s\n"
-			"system identifier    : %s\n"
-			"boot record signature: %04hX\n",
-			fs.e32->sfat,
-			fs.e32->opt,
-			fs.e32->ver,
-			fs.e32->rootno,
-			fs.e32->fsino,
-			fs.e32->fsckno,
-			fs.e32->drive,
-			fs.e32->nt, fs.e32->sig,
-			fs.e32->serial,
-			label2, sysid2,
-			fs.e32->bsig
-		);
+		fat32_stat(fs.e32);
 	printf(
 		"disk geometry:\n"
 		"total sectors   : %u\n"
@@ -206,10 +250,10 @@ int main(int argc, char **argv)
 		"fat start       : %hu\n"
 		"data sectors    : %u\n"
 		"cluster count   : %u\n",
-		nsec, sfat, ndir, data, fati, ndata, nclus
+		fs.nsec, fs.sfat, fs.ndir,
+		fs.data, fs.fati, fs.ndata, fs.nclus
 	);
-	const char *type = fstbl[fstype];
-	printf("fs type: %s\n", type);
+	printf("fs type: %s\n", fstbl[fs.fstype]);
 	for (unsigned i = 0; i < MDTBLSZ; ++i) {
 		const struct md *d = &mdtbl[i];
 		if (bpb->mdb == d->val && bpb->nhead == d->head && bpb->strack == d->sec) {
