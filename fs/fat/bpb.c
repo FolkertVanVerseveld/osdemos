@@ -266,7 +266,11 @@ static int root_stat(const struct vfat *fs)
 	for (pmap = map; *pmap && i < max; pmap += 32, ++i) ;
 	//printf("max: %u, entry count: %u\n", max, i);
 	max = i;
-	printf("root entry count: %u\ncontents:\n", max);
+	printf(
+		"root entry count: %u\ncontents:\n"
+		"  filename   type nt creation date and time access at  modification date   filesize   cluster\n",
+		max
+	);
 	char buf[64], fname[12];
 	for (pmap = map, i = 0; i < max; pmap += 32, ++i) {
 		item = (struct fat_entry*)pmap;
@@ -281,12 +285,49 @@ static int root_stat(const struct vfat *fs)
 		fname[ext_ri+2] = fname[10];
 		for (i = 0; i < ext_ri; ++i)
 			buf[i] = fname[i];
-		buf[i++] = '.';
-		buf[i++] = fname[ext_ri];
-		buf[i++] = fname[ext_ri+1];
-		buf[i++] = fname[ext_ri+2];
+		if (!(fname[ext_ri] == ' ' && fname[ext_ri+1] == ' ' && fname[ext_ri+2] == ' ')) {
+			buf[i++] = '.';
+			buf[i++] = fname[ext_ri];
+			buf[i++] = fname[ext_ri+1];
+			buf[i++] = fname[ext_ri+2];
+		}
 		buf[i] = '\0';
-		puts(buf);
+		uint32_t ctime, ct, cdate, cd, adate, ad, mdate, md, mtime, mt;
+		ct = item->ctime;
+		cd = item->cdate;
+		ad = item->adate;
+		md = item->mdate;
+		mt = item->mtime;
+		ctime = (ct & 0xf800) << 5 | (ct & 0x7e0) << 3 | (ct & 0x1f);
+		cdate = (cd & 0xfe00) << 7 | (cd & 0x1e0) << 3 | (cd & 0x1f);
+		adate = (ad & 0xfe00) << 7 | (ad & 0x1e0) << 3 | (ad & 0x1f);
+		mdate = (md & 0xfe00) << 7 | (md & 0x1e0) << 3 | (md & 0x1f);
+		mtime = (mt & 0xf800) << 5 | (mt & 0x7e0) << 3 | (mt & 0x1f);
+		printf(
+			"%12s  %02hhX  %02hhX "
+			"%04u-%02u-%02u %02u:%02u:%02u.%02u "
+			"%04u-%02u-%02u "
+			"%04u-%02u-%02u %02u:%02u:%02u %-10u %-10u\n",
+			buf, item->attr, item->nt,
+			1980 + ((cdate & 0x7f0000) >> 16),
+			(cdate & 0xf00) >> 8,
+			cdate & 0x1f,
+			(ctime & 0x1f0000) >> 16,
+			(ctime & 0x3f00) >> 8,
+			ctime & 0x1f,
+			item->ctime2 % 100,
+			1980 + ((adate & 0x7f0000) >> 16),
+			(adate & 0xf00) >> 8,
+			adate & 0x1f,
+			1980 + ((mdate & 0x7f0000) >> 16),
+			(mdate & 0xf00) >> 8,
+			mdate & 0x1f,
+			(mtime & 0x1f0000) >> 16,
+			(mtime & 0x3f00) >> 8,
+			mtime & 0x1f,
+			item->size,
+			(uint32_t)item->clhigh << 16 | item->cllow
+		);
 	}
 	return 0;
 }

@@ -72,7 +72,7 @@ struct fat32 {
 struct fat_entry {
 	char name[11];
 	uint8_t attr, nt, ctime2;
-	uint16_t ctime, cdate, atime;
+	uint16_t ctime, cdate, adate;
 	uint16_t clhigh;
 	uint16_t mtime, mdate;
 	uint16_t cllow;
