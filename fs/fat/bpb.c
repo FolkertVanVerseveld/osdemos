@@ -17,22 +17,23 @@ struct md {
 	uint8_t type;
 	uint16_t sec;
 	uint16_t head;
+	uint16_t cyl;
 	uint16_t diag;
 	const char *cap;
 };
 
 static const struct md mdtbl[] = {
-	{0xf0, 0, 36, 2, 350, "2.88MB"},
-	{0xf0, 0, 18, 2, 350, "1.44MB"},
-	{0xf8, 1,  0, 0,   0, "?"     },
-	{0xf9, 0,  9, 2, 350, "720KB" },
-	{0xf9, 0, 15, 2, 525, "1.2MB" },
-	{0xfa, 1,  0, 0,   0, "?"     },
-	{0xfb, 1,  0, 0,   0, "?"     },
-	{0xfc, 0,  9, 1, 525, "180KB" },
-	{0xfd, 0,  8, 1, 525, "360KB" },
-	{0xfe, 0,  8, 1, 525, "160KB" },
-	{0xff, 0,  8, 2, 525, "320KB" },
+	{0xf0, 0, 36, 2, 80, 350, "2.88MB"},
+	{0xf0, 0, 18, 2, 80, 350, "1.44MB"},
+	{0xf8, 1,  0, 0,  0,   0, "?"     },
+	{0xf9, 0,  9, 2, 80, 350, "720KB" },
+	{0xf9, 0, 15, 2, 80, 525, "1.2MB" },
+	{0xfa, 1,  0, 0,  0,   0, "?"     },
+	{0xfb, 1,  0, 0,  0,   0, "?"     },
+	{0xfc, 0,  9, 1, 40, 525, "180KB" },
+	{0xfd, 0,  8, 1, 90, 525, "360KB" },
+	{0xfe, 0,  8, 1, 40, 525, "160KB" },
+	{0xff, 0,  8, 2, 40, 525, "320KB" },
 };
 
 #define MDTBLSZ (sizeof(mdtbl)/(sizeof(mdtbl[0])))
@@ -379,12 +380,20 @@ int main(int argc, char **argv)
 			if (!d->type)
 				printf(
 					"physical format:\n"
-					"%s %u.%02u-inch, %u-sided, %u-sector\n",
+					"%s %u.%02u-inch, %u cylinders, %u-sided, %u-sector\n",
 					d->cap, d->diag / 100, d->diag % 100,
-					d->head, d->sec
+					d->cyl, d->head, d->sec
 				);
 			else
 				puts(d->val == 0xf8 ? "fixed disk" : "?");
+			unsigned long max = 1<<32;
+			if (fs.fstype == FS_FAT32)
+				max = 1<<28;
+			else if (fs.fstype == FS_FAT16)
+				max = 1<<16;
+			else if (fs.fstype == FS_FAT12)
+				max = 1<<12;
+			printf("max supported size: %lu\n", max * SECTORSZ * bpb->clsec);
 			goto end;
 		}
 	}
