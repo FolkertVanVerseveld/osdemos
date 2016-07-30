@@ -386,13 +386,13 @@ int main(int argc, char **argv)
 				);
 			else
 				puts(d->val == 0xf8 ? "fixed disk" : "?");
-			unsigned long max = 1<<32;
+			unsigned long max = 1LU<<32;
 			if (fs.fstype == FS_FAT32)
-				max = 1<<28;
+				max = 1LU<<28;
 			else if (fs.fstype == FS_FAT16)
-				max = 1<<16;
+				max = 1LU<<16;
 			else if (fs.fstype == FS_FAT12)
-				max = 1<<12;
+				max = 1LU<<12;
 			printf("max supported size: %lu\n", max * SECTORSZ * bpb->clsec);
 			goto end;
 		}
@@ -400,7 +400,7 @@ int main(int argc, char **argv)
 	fputs("bad physical format descriptor\n", stderr);
 	goto fail;
 end:
-	//cluster_stat(&fs);
+	cluster_stat(&fs);
 	root_stat(&fs);
 	ret = 0;
 fail:
