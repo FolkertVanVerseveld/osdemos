@@ -1,0 +1,30 @@
+#!/bin/bash -e
+dir='boot fs'
+for i in $dir; do
+	cd "$i"
+	./build $@
+	cd ..
+done
+cat <<END >.gitignore
+# Created by build script. Modifications are lost when rerun.
+.gitignore
+Makefile
+*.tmp
+# VIM
+*.swp
+*.vim
+# CC
+*.o
+END
+cat <<END >Makefile
+.PHONY: default clean
+
+default:
+END
+for i in $dir; do
+	printf '\tcd %s && $(MAKE) $(MFLAGS)\n' "$i" >>Makefile
+done
+printf 'clean:\n' >>Makefile
+for i in $dir; do
+	printf '\tcd %s && $(MAKE) clean\n' "$i" >>Makefile
+done
