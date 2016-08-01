@@ -1,0 +1,35 @@
+#!/bin/bash -e
+AS=nasm
+ASFLAGS='-f bin -Worphan-labels'
+cat <<END >.gitignore
+# Created by build script. Modifications are lost when rerun.
+.gitignore
+*.bin
+*.o
+Makefile
+END
+OBJECTS='init'
+cat <<EOF >Makefile
+.PHONY: default clean
+
+AS=$AS
+ASFLAGS=$ASFLAGS
+
+EOF
+printf "OBJECTS=" >>Makefile
+for i in $OBJECTS; do
+	printf ' \\\n\t%s' "$i.bin" >>Makefile
+done
+cat <<'EOF' >>Makefile
+
+default: $(OBJECTS)
+EOF
+for i in $OBJECTS; do
+	printf '%s%s\n' "$i.bin" "$($AS -M $i.s)" >>Makefile
+done
+cat <<'EOF' >>Makefile
+%.bin: %.s
+	$(AS) $< -o $@ $(ASFLAGS)
+clean:
+	rm -f $(OBJECTS)
+EOF

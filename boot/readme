@@ -1,0 +1,6 @@
+simple bootloaders without a file system are located here
+
+for bootloaders/boot_records/whatever on file systems,
+see fs/<name>/boot<something>
+
+e.g. FAT12 initial program loader: fs/fat/boot12.s
