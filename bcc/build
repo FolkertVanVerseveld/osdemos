@@ -1,0 +1,56 @@
+#!/bin/bash -e
+AS=nasm
+ASFLAGS='-f bin -Worphan-labels'
+CC=bcc
+CFLAGS='-c0'
+LD=ld86
+LDFLAGS='-d -T0x4000'
+cat <<END >.gitignore
+# Created by build script. Modifications are lost when rerun.
+.gitignore
+*.bin
+*.o
+*.kernel
+Makefile
+END
+OBJECTS='boot init'
+MAIN='flat'
+cat <<EOF >Makefile
+.PHONY: default clean
+
+AS=$AS
+ASFLAGS=$ASFLAGS
+CC=$CC
+CFLAGS=$CFLAGS
+LD=$LD
+LDFLAGS=$LDFLAGS
+
+EOF
+printf "OBJECTS=" >>Makefile
+for i in $OBJECTS; do
+	printf ' \\\n\t%s' "$i.bin" >>Makefile
+done
+for i in $MAIN; do
+	printf ' \\\n\t%s' "$i.kernel" >>Makefile
+done
+cat <<'EOF' >>Makefile
+
+default: $(OBJECTS)
+EOF
+for i in $OBJECTS; do
+	printf '%s%s\n' "$i.bin" "$($AS -M $i.s)" >>Makefile
+done
+for i in $MAIN; do
+	printf '%s%s\n' "$i.bin" "$(cc -MM $i.c)" >>Makefile
+done
+cat <<'EOF' >>Makefile
+%.bin: %.s
+	$(AS) $< -o $@ $(ASFLAGS)
+%.o: %.c
+	$(CC) $< -o $@ $(CFLAGS)
+%.kernel: %.o
+	$(LD) $< -o $@ $(LDFLAGS)
+clean:
+	rm -f $(OBJECTS)
+EOF
+
