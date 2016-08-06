@@ -8,11 +8,23 @@
 %endif
 %define DRIVE_START (BS_SECTORS+2)
 
+; sequence point
+struc seq_pt
+	.ss: resw 1
+	.sp: resw 1
+	.gs: resw 1
+	.fs: resw 1
+	.es: resw 1
+	.ds: resw 1
+	.cs: resw 1
+	.flags: resw 1
+endstruc
+
 org MMAP_BOOTAPI_ADDR
 bits 16
 
 	jmp short start
-	jmp word trap
+	jmp word api_call
 start:
 	mov bp, DRIVE_TRIES
 dskrst:
@@ -69,10 +81,19 @@ puts:
 	ret
 strk_missing db 'kernel not found', 13, 10, 0
 strk_return db 'kernel_main returned', 13, 10, 0
-trap:
-	mov si, str_trap
-	call puts
-	ret
+; similar to dos interrupt/syscall
+; bp+4 == nr
+; bp+6 == first argument
+api_call:
+	mov bx, [bp+4]
+	mov ax, [api_tbl + bx]
+	jmp ax
+; api jump table
+api_tbl:
+	dw kputs
+kputs:
+	mov si, [bp+6]
+	jmp puts
 str_trap db 'trap', 13, 10, 0
 	times (MMAP_BOOTAPI_SIG_ADDR - MMAP_BOOTAPI_ADDR) - ($ - $$) db 0
 	dw BOOTAPI_SIG
