@@ -1,5 +1,5 @@
 #!/bin/bash -e
-dir='boot fs'
+dir='bcc boot fs'
 for i in $dir; do
 	cd "$i"
 	./build $@

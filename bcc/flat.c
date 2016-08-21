@@ -1,15 +1,19 @@
 int main();
-void putchar(ch);
+void ksyscall();
+char *test;
 
 int main()
+{
+	ksyscall(0, test);
+	return 0;
+}
+
+void ksyscall(nr)
+int nr;
 {
 	void (*func)();
 	func = 0x602;
 	func();
-	return 0;
 }
 
-void putchar(ch)
-int ch;
-{
-}
+char *test = "whoah";
