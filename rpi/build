@@ -8,6 +8,7 @@ CFLAGS=-Wall -Wextra -pedantic -mcpu=arm1176jzf-s -fpic -ffreestanding
 OCOPY=arm-none-eabi-objcopy
 LD=\$(CC)
 LDFLAGS=-ffreestanding -nostdlib
+LDLIBS=-lgcc
 
 default: kernel.bin
 kernel.bin: kernel.elf
@@ -26,7 +27,7 @@ for i in $objc; do
 	i="${i/\.\//}"
 	obj="$obj ${i/.c/.o}"
 done
-printf 'kernel.elf: %s\n\t$(LD) -o kernel.elf $(LDFLAGS) -T linker.ld %s\n' "$obj" "$obj" >>Makefile
+printf 'kernel.elf: %s\n\t$(LD) -o kernel.elf $(LDFLAGS) -T linker.ld %s $(LDLIBS)\n' "$obj" "$obj" >>Makefile
 for i in $asm; do
 	$CC -MM "$i" >>Makefile
 done

@@ -45,6 +45,8 @@ enum {
 	UART0_TDR    = (UART0_BASE + 0x8C),
 };
 
+#define mmio_wait() delay(150)
+
 void uart_init()
 {
 	// Disable UART0.
@@ -53,10 +55,10 @@ void uart_init()
 
 	// Disable pull up/down for all GPIO pins & delay for 150 cycles.
 	mmio_write(GPPUD, 0);
-	delay(150);
+	mmio_wait();
 	// Disable pull up/down for pin 14,15 & delay for 150 cycles.
 	mmio_write(GPPUDCLK0, (1 << 14) | (1 << 15));
-	delay(150);
+	mmio_wait();
 
 	// Write 0 to GPPUDCLK0 to make it take effect.
 	mmio_write(GPPUDCLK0, 0);
