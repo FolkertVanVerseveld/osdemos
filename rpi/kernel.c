@@ -1,69 +1,65 @@
-#if !defined(__cplusplus)
-#include <stdbool.h>
-#endif
 #include <stddef.h>
 #include <stdint.h>
 
 static inline void mmio_write(uint32_t reg, uint32_t data)
 {
-	*(volatile uint32_t *)reg = data;
+	*(volatile uint32_t*)reg = data;
 }
 
 static inline uint32_t mmio_read(uint32_t reg)
 {
-	return *(volatile uint32_t *)reg;
+	return *(volatile uint32_t*)reg;
 }
 
 /* Loop <delay> times in a way that the compiler won't optimize away. */
 static inline void delay(int32_t count)
 {
-	asm volatile("__delay_%=: subs %[count], %[count], #1; bne __delay_%=\n"
-		 : : [count]"r"(count) : "cc");
+	asm volatile(
+		"__delay_%=: subs %[count], %[count], #1;"
+		"bne __delay_%=\n"
+		: : [count]"r"(count) : "cc"
+	);
 }
 
-size_t strlen(const char* str)
+size_t strlen(const char *str)
 {
-	size_t ret = 0;
-	while ( str[ret] != 0 )
-		ret++;
+	size_t ret;
+	for (ret = 0; str[ret]; ++ret)
+		;
 	return ret;
 }
 
-enum
-{
-    // The GPIO registers base address.
-    GPIO_BASE = 0x20200000,
+enum {
+	// The GPIO registers base address.
+	GPIO_BASE = 0x20200000,
 
-    // The offsets for reach register.
+	// The offsets for reach register.
 
-    // Controls actuation of pull up/down to ALL GPIO pins.
-    GPPUD = (GPIO_BASE + 0x94),
-
-    // Controls actuation of pull up/down for specific GPIO pin.
-    GPPUDCLK0 = (GPIO_BASE + 0x98),
-
-    // The base address for UART.
-    UART0_BASE = 0x20201000,
-
-    // The offsets for reach register for the UART.
-    UART0_DR     = (UART0_BASE + 0x00),
-    UART0_RSRECR = (UART0_BASE + 0x04),
-    UART0_FR     = (UART0_BASE + 0x18),
-    UART0_ILPR   = (UART0_BASE + 0x20),
-    UART0_IBRD   = (UART0_BASE + 0x24),
-    UART0_FBRD   = (UART0_BASE + 0x28),
-    UART0_LCRH   = (UART0_BASE + 0x2C),
-    UART0_CR     = (UART0_BASE + 0x30),
-    UART0_IFLS   = (UART0_BASE + 0x34),
-    UART0_IMSC   = (UART0_BASE + 0x38),
-    UART0_RIS    = (UART0_BASE + 0x3C),
-    UART0_MIS    = (UART0_BASE + 0x40),
-    UART0_ICR    = (UART0_BASE + 0x44),
-    UART0_DMACR  = (UART0_BASE + 0x48),
-    UART0_ITCR   = (UART0_BASE + 0x80),
-    UART0_ITIP   = (UART0_BASE + 0x84),
-    UART0_ITOP   = (UART0_BASE + 0x88),
-    UART0_TDR    = (UART0_BASE + 0x8C),
+	// Controls actuation of pull up/down to ALL GPIO pins.
+	GPPUD = (GPIO_BASE + 0x94),
+	// Controls actuation of pull up/down for specific GPIO pin.
+	GPPUDCLK0 = (GPIO_BASE + 0x98),
+	// The base address for UART.
+	UART0_BASE = 0x20201000,
+	// The offsets for reach register for the UART.
+	UART0_DR     = (UART0_BASE + 0x00),
+	UART0_RSRECR = (UART0_BASE + 0x04),
+	UART0_FR     = (UART0_BASE + 0x18),
+	UART0_ILPR   = (UART0_BASE + 0x20),
+	UART0_IBRD   = (UART0_BASE + 0x24),
+	UART0_FBRD   = (UART0_BASE + 0x28),
+	UART0_LCRH   = (UART0_BASE + 0x2C),
+	UART0_CR     = (UART0_BASE + 0x30),
+	UART0_IFLS   = (UART0_BASE + 0x34),
+	UART0_IMSC   = (UART0_BASE + 0x38),
+	UART0_RIS    = (UART0_BASE + 0x3C),
+	UART0_MIS    = (UART0_BASE + 0x40),
+	UART0_ICR    = (UART0_BASE + 0x44),
+	UART0_DMACR  = (UART0_BASE + 0x48),
+	UART0_ITCR   = (UART0_BASE + 0x80),
+	UART0_ITIP   = (UART0_BASE + 0x84),
+	UART0_ITOP   = (UART0_BASE + 0x88),
+	UART0_TDR    = (UART0_BASE + 0x8C),
 };
 
 void uart_init()
@@ -75,14 +71,12 @@ void uart_init()
 	// Disable pull up/down for all GPIO pins & delay for 150 cycles.
 	mmio_write(GPPUD, 0x00000000);
 	delay(150);
-
 	// Disable pull up/down for pin 14,15 & delay for 150 cycles.
 	mmio_write(GPPUDCLK0, (1 << 14) | (1 << 15));
 	delay(150);
 
 	// Write 0 to GPPUDCLK0 to make it take effect.
 	mmio_write(GPPUDCLK0, 0x00000000);
-
 	// Clear pending interrupts.
 	mmio_write(UART0_ICR, 0x7FF);
 
@@ -98,11 +92,9 @@ void uart_init()
 
 	// Enable FIFO & 8 bit data transmissio (1 stop bit, no parity).
 	mmio_write(UART0_LCRH, (1 << 4) | (1 << 5) | (1 << 6));
-
 	// Mask all interrupts.
 	mmio_write(UART0_IMSC, (1 << 1) | (1 << 4) | (1 << 5) | (1 << 6) |
-	                       (1 << 7) | (1 << 8) | (1 << 9) | (1 << 10));
-
+			(1 << 7) | (1 << 8) | (1 << 9) | (1 << 10));
 	// Enable UART0, receive & transfer part of UART.
 	mmio_write(UART0_CR, (1 << 0) | (1 << 8) | (1 << 9));
 }
@@ -110,40 +102,39 @@ void uart_init()
 void uart_putc(unsigned char byte)
 {
 	// Wait for UART to become ready to transmit.
-	while ( mmio_read(UART0_FR) & (1 << 5) ) { }
+	while (mmio_read(UART0_FR) & (1 << 5))
+		;
 	mmio_write(UART0_DR, byte);
 }
 
 unsigned char uart_getc()
 {
-    // Wait for UART to have recieved something.
-    while ( mmio_read(UART0_FR) & (1 << 4) ) { }
-    return mmio_read(UART0_DR);
+	// Wait for UART to have recieved something.
+	while (mmio_read(UART0_FR) & (1 << 4))
+		;
+	return mmio_read(UART0_DR);
 }
 
-void uart_write(const unsigned char* buffer, size_t size)
+void uart_write(const unsigned char *buffer, size_t size)
 {
-	for ( size_t i = 0; i < size; i++ )
+	for (size_t i = 0; i < size; ++i)
 		uart_putc(buffer[i]);
 }
 
-void uart_puts(const char* str)
+void uart_puts(const char *str)
 {
-	uart_write((const unsigned char*) str, strlen(str));
+	uart_write((const unsigned char*)str, strlen(str));
 }
 
-#if defined(__cplusplus)
-extern "C" /* Use C linkage for kernel_main. */
-#endif
 void kernel_main(uint32_t r0, uint32_t r1, uint32_t atags)
 {
-	(void) r0;
-	(void) r1;
-	(void) atags;
+	(void)r0;
+	(void)r1;
+	(void)atags;
 
 	uart_init();
 	uart_puts("Hello, kernel World!\r\n");
 
-	while ( true )
+	while (1)
 		uart_putc(uart_getc());
 }
