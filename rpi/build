@@ -1,0 +1,32 @@
+#!/bin/bash -e
+CC=arm-none-eabi-gcc
+cat <<EOF >Makefile
+.PHONY: default clean
+
+CC=$CC
+CFLAGS=-Wall -Wextra -pedantic -mcpu=arm1176jzf-s -fpic -ffreestanding
+OCOPY=arm-none-eabi-objcopy
+LD=\$(CC)
+LDFLAGS=-ffreestanding -nostdlib
+
+default: kernel.bin
+kernel.bin: kernel.elf
+	\$(OCOPY) kernel.elf -O binary kernel.bin
+EOF
+files=$(find . -name '*.c')
+asm=$(find . -name '*.S')
+objc="${files//.c/.o}"
+objS="${asm//.S/.o}"
+obj="$objS $objc"
+obj="${obj//.\//}"
+printf 'kernel.elf: %s\n\t$(LD) -o kernel.elf $(LDFLAGS) -T linker.ld %s\n' "$obj" "$obj" >>Makefile
+for i in $asm; do
+	$CC -MM "$i" >>Makefile
+done
+for i in $files; do
+	$CC -MM "$i" >>Makefile
+done
+cat <<EOF >>Makefile
+clean:
+	rm -f kernel.bin kernel.elf $objS $objC
+EOF
