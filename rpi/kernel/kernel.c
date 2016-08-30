@@ -12,9 +12,10 @@ void kernel_main(uint32_t r0, uint32_t r1, uint32_t atags)
 	(void)atags;
 
 	uart_init();
-	int n;
-	n = printf("Hello, %s World!\n", "kernel");
-	n = printf("written: %d\n", n);
-	printf("written: %d\n", n);
-	printf("length: %u\n", (unsigned)strlen("written: "));
+	printf(
+		"r0=%x,r1=%x,atags=%x\n",
+		(unsigned)r0,
+		(unsigned)r1,
+		(unsigned)atags
+	);
 }
