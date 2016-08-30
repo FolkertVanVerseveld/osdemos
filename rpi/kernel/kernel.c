@@ -1,6 +1,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <limits.h>
+#include "io.h"
 #include "uart.h"
 #include "stdio.h"
 #include "string.h"
