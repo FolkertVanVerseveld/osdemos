@@ -10,6 +10,7 @@ struct fbinfo {
 	unsigned size;
 } __attribute__((aligned(16)));
 
+void fb_stat(void);
 void *fb_init(unsigned width, unsigned height, unsigned bits);
 
 #endif

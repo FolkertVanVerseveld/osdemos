@@ -58,13 +58,49 @@ void mbox_write(unsigned char channel, uint32_t data)
 	do
 		mem_sync();
 	while (mmio_read(MB0STATUS) & MBOX_FULL);
-	mmio_write(MB1WRITE, (data | channel));
+	mmio_write(MB1WRITE, data | channel);
 	mem_sync();
 	printf("written to %X: %X\n", MB1WRITE, (unsigned)data | channel);
 }
 
+struct buf {
+	uint32_t size;
+	uint32_t code;
+	struct {
+		uint32_t id;
+		uint32_t valuesz;
+		uint32_t valuelen;
+		uint32_t value;
+	} tag;
+} buf __attribute__((aligned(16)));
+
+void fb_stat(void)
+{
+	/*
+	get firmware version
+	tag: 1
+	request: length: 0
+	response: length: 4, value: u32: firmware version
+
+	channel request: 8
+	channel response: 9
+	*/
+	puts("fb_stat");
+	buf.tag.id = 1;
+	buf.tag.valuesz = buf.tag.valuelen = 4;
+	buf.tag.value = 0;
+	buf.code = 0;
+	buf.size = 6 * sizeof(uint32_t);
+	mbox_write(8, 0x40000000 + (uint32_t)&buf);
+	unsigned result = mbox_read(9);
+	// FIXME does not print anything
+	// seems like channel 8 request is incorrectly setup
+	printf("result = %u\n", result);
+}
+
 void *fb_init(unsigned width, unsigned height, unsigned bits)
 {
+	puts("fb_init");
 	if (width > 4096 || height > 4096 || bits > 32)
 		return NULL;
 	fb_setup.width = fb_setup.vwidth = width;
