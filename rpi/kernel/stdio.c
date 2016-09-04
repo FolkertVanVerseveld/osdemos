@@ -1,4 +1,5 @@
 #include "stdio.h"
+#include <stddef.h>
 #include <stdarg.h>
 #include <limits.h>
 #include "string.h"
@@ -98,7 +99,8 @@ int printf(const char *restrict format, ...)
 				long long arg;
 				switch (wide) {
 					case 3:
-						arg = va_arg(args, ssize_t);
+						/* XXX should be ssize_t, but stddef does not provide one */
+						arg = va_arg(args, long signed int);
 						break;
 					case 2:
 						arg = va_arg(args, long long);
