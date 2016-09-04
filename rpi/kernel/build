@@ -4,7 +4,7 @@ cat <<EOF >Makefile
 .PHONY: default clean
 
 CC=$CC
-CFLAGS=-Wall -Wextra -pedantic -mcpu=arm1176jzf-s -fpic -ffreestanding
+CFLAGS=-std=gnu99 -Wall -Wextra -pedantic -mcpu=arm1176jzf-s -fpic -ffreestanding
 OCOPY=arm-none-eabi-objcopy
 LD=\$(CC)
 LDFLAGS=-ffreestanding -nostdlib

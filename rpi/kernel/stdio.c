@@ -21,11 +21,17 @@ int puts(const char *str)
 	return len & INT_MAX;
 }
 
+/*
+simple printf that lacks many conversion specifiers.
+some of them may be added in the future in userspace,
+but probably not in kernel space.
+*/
 int printf(const char *restrict format, ...)
 {
 	const char *ptr;
 	unsigned n = 0;
 	unsigned long long num;
+	int wide;
 	va_list args;
 	va_start(args, format);
 	for (ptr = format; *ptr; ++ptr) {
@@ -36,6 +42,11 @@ int printf(const char *restrict format, ...)
 		}
 		if (!*++ptr)
 			break;
+		wide = 0;
+		/* note that the shortest type in va_arg is a word
+		(e.g. int) so there's no need to add special cases
+		for elements shorter than an (unsigned) int */
+	parse_opt:
 		switch (*ptr) {
 			case 'X': {
 				unsigned i, ch, num = va_arg(args, unsigned);
@@ -57,7 +68,20 @@ int printf(const char *restrict format, ...)
 			}
 			case 'u': {
 				unsigned long long m;
-				num = va_arg(args, unsigned);
+				switch (wide) {
+					case 3:
+						num = va_arg(args, size_t);
+						break;
+					case 2:
+						num = va_arg(args, unsigned long long);
+						break;
+					case 1:
+						num = va_arg(args, unsigned long);
+						break;
+					default:
+						num = va_arg(args, unsigned);
+						break;
+				}
 			arg_u:
 				for (m = 1; m < num; m *= 10)
 					;
@@ -72,7 +96,20 @@ int printf(const char *restrict format, ...)
 			}
 			case 'd': {
 				long long arg;
-				arg = va_arg(args, int);
+				switch (wide) {
+					case 3:
+						arg = va_arg(args, ssize_t);
+						break;
+					case 2:
+						arg = va_arg(args, long long);
+						break;
+					case 1:
+						arg = va_arg(args, long);
+						break;
+					default:
+						arg = va_arg(args, int);
+						break;
+				}
 				if (arg < 0) {
 					putchar('-');
 					num = -arg;
@@ -92,12 +129,28 @@ int printf(const char *restrict format, ...)
 				uart_write((const unsigned char*)str, len);
 				break;
 			}
+			case 'l':
+				++wide;
+				if (!*++ptr)
+					goto end;
+				goto parse_opt;
+			case 'h':
+				--wide;
+				if (!*++ptr)
+					goto end;
+				goto parse_opt;
+			case 'z':
+				wide = 3;
+				if (!*++ptr)
+					goto end;
+				goto parse_opt;
 			default:
 				putchar(*ptr);
 				++n;
 				break;
 		}
 	}
+end:
 	va_end(args);
 	return n;
 }
