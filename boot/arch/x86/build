@@ -8,7 +8,7 @@ cat <<END >.gitignore
 *.o
 Makefile
 END
-OBJECTS='init'
+OBJECTS=$@
 cat <<EOF >Makefile
 .PHONY: default clean
 
