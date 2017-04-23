@@ -27,6 +27,8 @@ main:
 	jz dump
 	cmp al, 'g'
 	jz go
+	cmp al, 'l'
+	jz load
 	jmp .loop
 assemble:
 	call put_key
@@ -93,6 +95,57 @@ go:
 	jmp .lbl
 .lbl:
 	jmp 0:start
+load:
+	; get ES:BX
+	call put_key
+	call get_word
+	mov ax, es
+	push es
+	mov al, ':'
+	call put_key
+	call get_word
+	push ax
+	; get sector count
+	mov al, '*'
+	call put_key
+	call get_byte
+	mov ah, 0x02
+	push ax
+	; get cylinder count and sector
+	; CH = low eights bits of cylinder count
+	; CL = high two bits of cylinder count (bits 6-7)
+	;      and sector (bits 0-5)
+	mov al, '@'
+	call put_key
+	call get_word
+	push ax
+	; get head number and drive letter
+	mov al, '$'
+	call put_key
+	call get_word
+	mov dx, ax
+	; retrieve args
+	pop cx
+	pop ax
+	pop bx
+	pop es
+	int 13h
+	pushf
+	push ax
+	mov al, ':'
+	call put_key
+	pop ax
+	call putshort
+	mov al, ':'
+	call put_key
+	pop ax
+	call putshort
+	jmp main
+putshort:
+	push ax
+	mov al, ah
+	call putbyte
+	pop ax
 putbyte:
 	push ax
 	shr al, byte 4
