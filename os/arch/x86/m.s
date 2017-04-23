@@ -25,6 +25,8 @@ main:
 	jz assemble
 	cmp al, 'd'
 	jz dump
+	cmp al, 'g'
+	jz go
 	jmp .loop
 assemble:
 	call put_key
@@ -79,6 +81,18 @@ dump:
 	pop cx
 	loop .loop
 	jmp main
+go:
+	call put_key
+	call get_word
+	mov word [.lbl + 3], ax
+	mov al, ':'
+	call put_key
+	call get_word
+	mov word [.lbl + 1], ax
+	; trash pipeline
+	jmp .lbl
+.lbl:
+	jmp 0:start
 putbyte:
 	push ax
 	shr al, byte 4
