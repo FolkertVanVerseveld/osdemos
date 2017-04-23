@@ -29,7 +29,16 @@ main:
 	jz go
 	cmp al, 'l'
 	jz load
+	cmp al, 'r'
+	jz disk_reset
 	jmp .loop
+disk_reset:
+	call put_key
+	call get_byte
+	mov ah, 0
+	mov dl, al
+	int 13h
+	jmp disk_stat
 assemble:
 	call put_key
 	call get_word
@@ -130,6 +139,7 @@ load:
 	pop bx
 	pop es
 	int 13h
+disk_stat:
 	pushf
 	push ax
 	mov al, ':'
