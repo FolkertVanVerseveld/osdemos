@@ -1,12 +1,13 @@
 ; tiny monitor
 org 0x7c00
 
+reset:
 	jmp 0:start
 start:
 	cli
 	xor ax, ax
 	mov ss, ax
-	mov sp, start
+	mov sp, reset
 	mov ds, ax
 	mov es, ax
 	sti
@@ -133,9 +134,7 @@ get_xdigit:
 	mov bl, al
 	cmp al, ' '
 	jne .1
-; XXX for some reason, jumping to reset does not work while 0:start does
-	;jmp 0:reset
-	jmp 0:start
+	jmp 0:reset
 .1:
 	cmp al, '0'
 	jb get_xdigit
