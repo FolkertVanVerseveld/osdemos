@@ -22,6 +22,8 @@ main:
 	int 16h
 	cmp al, 'a'
 	jz assemble
+	cmp al, 'd'
+	jz dump
 	jmp .loop
 assemble:
 	call put_key
@@ -43,6 +45,56 @@ assemble:
 	cld
 	stosb
 	jmp .loop
+dump:
+	call put_key
+	call get_word
+	push ax
+	mov al, ':'
+	call put_key
+	call get_word
+	push ax
+	mov al, '*'
+	call put_key
+	call get_byte
+	pop si
+	pop ds
+	mov cl, al
+	mov ch, 0
+.loop:
+	push cx
+	push ds
+	push si
+	mov al, ','
+	call put_key
+	pop si
+	pop ds
+	cld
+	lodsb
+	push ds
+	push si
+	call putbyte
+	pop si
+	pop ds
+	pop cx
+	loop .loop
+	jmp main
+putbyte:
+	push ax
+	shr al, byte 4
+	call putnyb
+	pop ax
+putnyb:
+	and al, byte 0xf
+	mov dl, 10
+	cmp al, dl
+	jb .1
+	add al, 'A' - '0' - 10
+.1:
+	add al, '0'
+putc:
+	mov ah, 0xe
+	int 10h
+	ret
 put_key:
 	mov ah, 0xe
 	int 10h
