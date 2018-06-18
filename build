@@ -1,9 +1,9 @@
 #!/bin/bash -e
-dir='bcc boot fs'
+dir='bcc boot/arch/x86 fs'
 for i in $dir; do
 	cd "$i"
 	./build $@
-	cd ..
+	cd -
 done
 cat <<END >.gitignore
 # Created by build script. Modifications are lost when rerun.

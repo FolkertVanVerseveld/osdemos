@@ -1,4 +1,14 @@
-; tiny monitor
+; copyright 2017-2018 folkert van verseveld
+; all rights reserved
+;
+; tiny monitor with spartan interface
+; the program is a completely self contained bootable floppy
+;
+; stack starts at program start
+; program layout:
+; 0x00007c00 start of stack and program start
+; 0x00007dff end of program
+
 org 0x7c00
 
 reset:
@@ -12,13 +22,10 @@ start:
 	mov es, ax
 	sti
 main:
-	; put newline
-	mov ax, 0x0e0d
-	int 10h
-	mov al, 0xa
-	int 10h
+	; print '\r\n'
+	call putln
 .loop:
-	; get keystroke
+	; get command
 	mov ah, 0
 	int 16h
 	cmp al, 'a'
@@ -32,6 +39,12 @@ main:
 	cmp al, 'r'
 	jz disk_reset
 	jmp .loop
+; ask for drive letter to be reset and dump result from interrupt e.g.:
+;       r 80
+; or  : r 00
+; yield respectively:
+; r 80: 0180: 0283
+; r 00: 0000: 0246
 disk_reset:
 	call put_key
 	call get_byte
@@ -59,6 +72,9 @@ assemble:
 	cld
 	stosb
 	jmp .loop
+; dump memory
+; example: d 07c0: 0000* 10
+; dumps 10 bytes starting at 0x07c0:0
 dump:
 	call put_key
 	call get_word
@@ -72,8 +88,15 @@ dump:
 	call get_byte
 	pop si
 	pop ds
+; if count is 0, use 0x100
+	cmp al, 0
+	jnz .skip
+	mov cx, 0x100
+	jmp .loop
+.skip:
 	mov cl, al
 	mov ch, 0
+; dump memory
 .loop:
 	push cx
 	push ds
@@ -86,20 +109,42 @@ dump:
 	lodsb
 	push ds
 	push si
+
+	push ax
+	; put newline for each 16 bytes
+	mov al, byte [es:cnt]
+	cmp al, 15
+	jnz .skip2
+	call putln
+	mov al, 0
+	mov byte [es:cnt], al
+	jmp .skip3
+.skip2:
+	inc byte [es:cnt]
+.skip3:
+	pop ax
+
 	call putbyte
+
 	pop si
 	pop ds
 	pop cx
+
 	loop .loop
+	; restore counter
+	mov al, 15
+	mov byte [es:cnt], al
 	jmp main
+cnt:
+	db 15
 go:
 	call put_key
 	call get_word
-	mov word [.lbl + 3], ax
+	mov word [es:.lbl + 3], ax
 	mov al, ':'
 	call put_key
 	call get_word
-	mov word [.lbl + 1], ax
+	mov word [es:.lbl + 1], ax
 	; trash pipeline
 	jmp .lbl
 .lbl:
@@ -121,7 +166,7 @@ load:
 	mov ah, 0x02
 	push ax
 	; get cylinder count and sector
-	; CH = low eights bits of cylinder count
+	; CH = low eight bits of cylinder count
 	; CL = high two bits of cylinder count (bits 6-7)
 	;      and sector (bits 0-5)
 	mov al, '@'
@@ -139,6 +184,8 @@ load:
 	pop bx
 	pop es
 	int 13h
+; dump ax and flags
+; this is called after a drive has been reset
 disk_stat:
 	pushf
 	push ax
@@ -151,6 +198,8 @@ disk_stat:
 	pop ax
 	call putshort
 	jmp main
+
+; text output routines
 putshort:
 	push ax
 	mov al, ah
@@ -179,6 +228,8 @@ put_key:
 	mov al, ' '
 	int 10h
 	ret
+
+; text input routines
 get_word:
 	call get_byte
 	mov ah, al
@@ -227,5 +278,13 @@ get_xdigit:
 	sub al, 'a' - 10
 	ret
 
+putln:
+	mov ax, 0x0e0d
+	int 10h
+	mov al, 0xa
+	int 10h
+	ret
+
+; make block bootable
 	times 0x200 - 2 - ($ - $$) db 0
 	dw 0xaa55
