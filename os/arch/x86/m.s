@@ -74,7 +74,7 @@ assemble:
 	jmp .loop
 ; dump memory
 ; example: d 07c0: 0000* 10
-; dumps 10 bytes starting at 0x07c0:0
+; dumps 16 bytes starting at 0x07c0:0
 dump:
 	call put_key
 	call get_word
@@ -137,6 +137,8 @@ dump:
 	jmp main
 cnt:
 	db 15
+; jump to specified address. e.g.: g 07c0:0000
+; restarts the program
 go:
 	call put_key
 	call get_word
@@ -149,12 +151,20 @@ go:
 	jmp .lbl
 .lbl:
 	jmp 0:start
+; read sectors into memory. e.g.:
+; l 07e0: 0000* 01@ 0001$ 0000: 0001: 0246
+;   segm: offs* nn@ cyle$ hhdd:
+; segm = segment
+; offs = offset
+; nn   = sector count
+; cyle = cylinder count (see below for format)
+; hh   = head number
+; dd   = drive number
 load:
 	; get ES:BX
 	call put_key
 	call get_word
-	mov ax, es
-	push es
+	push ax
 	mov al, ':'
 	call put_key
 	call get_word
@@ -184,6 +194,9 @@ load:
 	pop bx
 	pop es
 	int 13h
+	; restore es for other commands
+	mov ax, 0
+	mov es, ax
 ; dump ax and flags
 ; this is called after a drive has been reset
 disk_stat:
