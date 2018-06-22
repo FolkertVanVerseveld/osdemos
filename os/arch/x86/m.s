@@ -9,6 +9,19 @@
 ; 0x00007c00 start of stack and program start
 ; 0x00007dff end of program
 
+; the following commands are supported:
+;  a  write to memory
+;  d  dump memory
+;  g  jump to address
+;  l  load from drive
+;  r  reset disk drive
+; press ` ' to terminate commands asking user input
+
+; compile with:
+;   nasm -f bin -o m.bin m.s
+; and run with:
+;   qemu-system-i386 -m 1 -drive file=m.bin,format=raw -monitor stdio
+
 org 0x7c00
 
 reset:
@@ -42,7 +55,7 @@ main:
 ; ask for drive letter to be reset and dump result from interrupt e.g.:
 ;       r 80
 ; or  : r 00
-; yield respectively:
+; yield respectively when booting from floppy:
 ; r 80: 0180: 0283
 ; r 00: 0000: 0246
 disk_reset:
@@ -53,22 +66,26 @@ disk_reset:
 	int 13h
 	jmp disk_stat
 assemble:
-	call put_key
-	call get_word
-	push ax
+	call read_word
 	mov al, ':'
-	call put_key
-	call get_word
+	call read_word
+	pop di
 	pop es
-	mov di, ax
+	; remember that you can terminate this loop by pressing ` '
 .loop:
 	mov al, ','
 	call put_key
+
+	; make sure we don't globber destination ptr
 	push es
 	push di
+
 	call get_byte
+
 	pop di
 	pop es
+
+	; write data
 	cld
 	stosb
 	jmp .loop
@@ -76,19 +93,15 @@ assemble:
 ; example: d 07c0: 0000* 10
 ; dumps 16 bytes starting at 0x07c0:0
 dump:
-	call put_key
-	call get_word
-	push ax
+	call read_word
 	mov al, ':'
-	call put_key
-	call get_word
-	push ax
+	call read_word
 	mov al, '*'
 	call put_key
 	call get_byte
 	pop si
 	pop ds
-; if count is 0, use 0x100
+	; if count is 0, use 0x100
 	cmp al, 0
 	jnz .skip
 	mov cx, 0x100
@@ -162,35 +175,28 @@ go:
 ; dd   = drive number
 load:
 	; get ES:BX
-	call put_key
-	call get_word
-	push ax
+	call read_word
 	mov al, ':'
-	call put_key
-	call get_word
-	push ax
+	call read_word
 	; get sector count
 	mov al, '*'
 	call put_key
 	call get_byte
-	mov ah, 0x02
 	push ax
 	; get cylinder count and sector
 	; CH = low eight bits of cylinder count
 	; CL = high two bits of cylinder count (bits 6-7)
 	;      and sector (bits 0-5)
 	mov al, '@'
-	call put_key
-	call get_word
-	push ax
+	call read_word
 	; get head number and drive letter
 	mov al, '$'
-	call put_key
-	call get_word
-	mov dx, ax
+	call read_word
+	pop dx
 	; retrieve args
 	pop cx
 	pop ax
+	mov ah, 0x02
 	pop bx
 	pop es
 	int 13h
@@ -297,6 +303,17 @@ putln:
 	mov al, 0xa
 	int 10h
 	ret
+
+; equivalent as if we have inlined the following:
+;   call put_key
+;   call get_word
+;   push ax
+read_word:
+	call put_key
+	call get_word
+	pop bx
+	push ax
+	jmp bx
 
 ; make block bootable
 	times 0x200 - 2 - ($ - $$) db 0
