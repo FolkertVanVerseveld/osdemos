@@ -99,15 +99,28 @@ init:
 	xor ax, ax
 	mov ds, ax
 	loop .loop
+	; install custom int3 handler
+	cld
+	mov di, 3 * 4
+	mov ax, dbg
+	stosw
+	xor ax, ax
+	stosw
+	; custom handler has been installed
+	; make sure we are in the correct video mode
+	; this also clears the screen and resets the cursor
+	mov ax, 0x0003
+	int 10h
+
+	; TODO dump initial program state
+
 	; dump twice to see to ensure
 	; nothing gets thrashed
-	;call dump
-	;call dump
-	call dump2
-	call dump2
+	int3 ; db 0xcc
+	int3 ; db 0xcc
 	jmp hang
 
-dump2:
+dump:
 	push eax
 	push ds
 
@@ -120,11 +133,11 @@ dump2:
 	pop ds
 	pop eax
 
-	jmp dump
+	jmp _dump
 
 ; dump processor state
 ; all registers are preserved
-dump:
+_dump:
 	push ds
 	push es
 
@@ -369,6 +382,32 @@ tries:
 	dw 0xaa55
 
 part2:
+
+dbg:
+	pushad
+	push ds
+	push es
+
+	; figure out EIP
+	pushfd
+	push eax
+	xor eax, eax
+	mov ds, ax
+	mov es, ax
+	push bx
+	mov bx, sp
+	mov ax, word [bx + 46]
+	mov dword [eip_old], eax
+	pop bx
+	pop eax
+	popfd
+	call _dump
+
+	pop es
+	pop ds
+	popad
+
+	iretw
 
 str_text:
 	db 'EAX=%X EBX=%X ECX=%X EDX=%X CS=%H DS=%H ES=%H', 0xd, 0xa
