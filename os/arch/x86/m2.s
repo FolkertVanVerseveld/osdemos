@@ -440,18 +440,19 @@ part2:
 
 .left:
 	call get_cursor
+	cmp dl, 0
+	je .wleft
 	dec dl
-	js .wleft
 	jmp .set
 .wleft:
 	mov dl, 80 - 1
 	dec dh
 	jns .set
 	mov dh, 0
+	call set_cursor
+	jmp .sup
 .set:
-	mov ah, 2
-	mov bh, 0
-	int 10h
+	call set_cursor
 	jmp .l
 
 .right:
@@ -468,6 +469,11 @@ part2:
 
 get_cursor:
 	mov ah, 3
+	mov bh, 0
+	int 10h
+	ret
+set_cursor:
+	mov ah, 2
 	mov bh, 0
 	int 10h
 	ret
