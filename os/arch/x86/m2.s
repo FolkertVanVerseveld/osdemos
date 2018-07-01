@@ -114,11 +114,11 @@ init:
 
 	; TODO dump initial program state
 
-	; dump twice to see to ensure
-	; nothing gets thrashed
+	; dump twice to check nothing gets thrashed
+	; (except EIP is different of course)
 	int3 ; db 0xcc
 	int3 ; db 0xcc
-	jmp hang
+	jmp part2
 
 dump:
 	push eax
@@ -382,6 +382,95 @@ tries:
 	dw 0xaa55
 
 part2:
+	;mov ah, 3
+	;mov bh, 0
+	;int 10h
+	;int3
+
+	; scroll down test
+.l:
+	mov ah, 0
+	int 16h
+	cmp ah, 0x50
+	je .down
+	cmp ah, 0x48
+	je .up
+	cmp ah, 0x4b
+	je .left
+	cmp ah, 0x4d
+	je .right
+	jmp .l
+.down:
+	; save cursor
+	call get_cursor
+	cmp dh, 25 - 2
+	jae .sdown
+	; move down
+	add dh, 1 ; increment row
+	jmp .set
+
+.sdown:
+	mov dh, 25 - 2
+	mov ah, 2
+	mov bh, 0
+	int 10h
+	; scroll all except last row up (i.e. 25 - 1 rows)
+	mov ax, 0x0601 ; al = lines
+	mov bh, 7 ; light gray
+	xor cx, cx
+	mov dx, 0x1850 ; 24 rows, 80 columns
+	int 10h
+	jmp .l
+.up:
+	; save cursor
+	call get_cursor
+	cmp dh, 0
+	je .sup
+	dec dh
+	jmp .set
+
+.sup:
+	; scroll all except last row up (i.e. 25 - 1 rows)
+	mov ax, 0x0701 ; al = lines
+	mov bh, 7 ; light gray
+	xor cx, cx
+	mov dx, 0x1850 ; 24 rows, 80 columns
+	int 10h
+	jmp .l
+
+.left:
+	call get_cursor
+	dec dl
+	js .wleft
+	jmp .set
+.wleft:
+	mov dl, 80 - 1
+	dec dh
+	jns .set
+	mov dh, 0
+.set:
+	mov ah, 2
+	mov bh, 0
+	int 10h
+	jmp .l
+
+.right:
+	call get_cursor
+	inc dl
+	cmp dl, 80
+	jne .set
+.wright:
+	mov dl, 0
+	inc dh
+	cmp dh, 25 - 3
+	ja .sdown
+	jmp .set
+
+get_cursor:
+	mov ah, 3
+	mov bh, 0
+	int 10h
+	ret
 
 dbg:
 	pushad
