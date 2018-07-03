@@ -57,6 +57,7 @@ start:
 	mov es, ax
 	mov ss, ax
 	mov sp, STACK_ADDR
+	mov word [sp_old], bx
 	; in case the bios fucks this up
 	mov dl, byte [drive]
 	sti
@@ -99,6 +100,7 @@ init:
 	xor ax, ax
 	mov ds, ax
 	loop .loop
+
 	; install custom int3 handler
 	cld
 	mov di, 3 * 4
@@ -144,9 +146,10 @@ _dump:
 	; prepare all arguments for dumping
 	pushfd
 	pushad
-	; make it easier to grab eflags later (see line 165)
+	; make it easier to grab eflags later (see line 183)
 	pushfd
 
+_dump2:
 	push ss
 	push gs
 	push fs
@@ -156,6 +159,7 @@ _dump:
 	push esi
 	push es
 	push ds
+	; TODO use self-modifying code to hack cs
 	push cs
 	push edx
 	push ecx
@@ -175,7 +179,7 @@ _dump:
 	; eflags has 18 fields (including preserved bits)
 	mov cx, 18
 
-	; grab eflags (see line 134)
+	; grab eflags (see line 150)
 	pop edx
 
 	mov ebp, 0x00040000
@@ -382,10 +386,21 @@ tries:
 	dw 0xaa55
 
 part2:
-	;mov ah, 3
-	;mov bh, 0
-	;int 10h
+	; TODO dump initial program state
+
+	;push ds
+	;mov si, word [sp_old]
+	;mov ax, DBG_ADDR_TMP / 16
+	;mov ds, ax
 	;int3
+	;jmp hang
+	;;mov ax, 0xffff
+	;;mov ds, ax
+	;;mov si, 0
+	;call dump_row
+	;pop ds
+
+	int3
 
 	; scroll down test
 .l:
@@ -403,18 +418,18 @@ part2:
 .down:
 	; save cursor
 	call get_cursor
-	cmp dh, 25 - 2
+	cmp dh, 25 - 1
 	jae .sdown
 	; move down
 	add dh, 1 ; increment row
 	jmp .set
 
 .sdown:
-	mov dh, 25 - 2
+	mov dh, 25 - 1
 	mov ah, 2
 	mov bh, 0
 	int 10h
-	; scroll all except last row up (i.e. 25 - 1 rows)
+	; scroll all rows up (i.e. 25 rows)
 	mov ax, 0x0601 ; al = lines
 	mov bh, 7 ; light gray
 	xor cx, cx
@@ -430,7 +445,7 @@ part2:
 	jmp .set
 
 .sup:
-	; scroll all except last row up (i.e. 25 - 1 rows)
+	; scroll all rows up (i.e. 25 rows)
 	mov ax, 0x0701 ; al = lines
 	mov bh, 7 ; light gray
 	xor cx, cx
@@ -463,7 +478,7 @@ part2:
 .wright:
 	mov dl, 0
 	inc dh
-	cmp dh, 25 - 3
+	cmp dh, 25 - 2
 	ja .sdown
 	jmp .set
 
@@ -478,12 +493,20 @@ set_cursor:
 	int 10h
 	ret
 
+; core debug handler
+; this is the most important part of the whole program it dumps the
+; current processor state and allows one to invoke commands. e.g.:
+; modify memory, dump memory, jump to address, dissassemble code
+;
+; note that flags is already pushed on the stack: so pushf ... popf are
+; not necessary.
 dbg:
 	pushad
 	push ds
 	push es
 
 	; figure out EIP
+	; FIXME figure out cs
 	pushfd
 	push eax
 	xor eax, eax
@@ -491,29 +514,136 @@ dbg:
 	mov es, ax
 	push bx
 	mov bx, sp
+	; EIP is just IP in real mode
 	mov ax, word [bx + 46]
+	; upper half is zero (see line xor eax, eax)
 	mov dword [eip_old], eax
+	mov ax, word [bx + 48]
+	mov word [cs_old], ax
 	pop bx
+	; check if debug handler is already running
+	mov al, byte [dbg_state]
+	and al, 1
+	jz .s
+	mov si, str_dbg_loop
+	jmp hcf
+.s:
+	; acknowledge debug handler
+	or al, 1
+	mov byte [dbg_state], al
+	; restore registers for dumping
 	pop eax
 	popfd
-	call _dump
 
 	pop es
 	pop ds
+
+	call _dump
+
+	; finish debug handler
+	mov al, byte [dbg_state]
+	and al, 0xfe
+	mov byte [dbg_state], al
+
+	; dump first row where cs:ip points to
+	push ds
+
+	mov ax, word [cs_old]
+	mov ds, ax
+	mov si, word [eip_old]
+	call dump_row
+
+	pop ds
+
+	; FIXME write custom keyboard driver
+	; wait for key press
+	;mov ah, 0
+	;int 16h
+
 	popad
 
 	iretw
+; generic panic method
+hcf:
+	; just to make sure we have a proper environment
+	cli
+	jmp 0:.reset
+.reset:
+	xor ax, ax
+	mov ss, ax
+	mov sp, STACK_ADDR
+	; enable the user to use CTRL+ALT+DEL
+	sti
+	; print message and die
+	call puts
+.hang:
+	hlt
+	jmp .hang
+
+dump_row:
+	; convert ds:si to flat address
+	xor eax, eax
+	mov ax, ds
+	shl eax, byte 4
+	add ax, si
+	jnc .s
+	add eax, 0x10000
+.s:
+	; save for dumping flat address
+	push eax
+
+	; fetch row
+	xor bx, bx
+	mov es, bx
+	mov di, row_buf
+	mov cx, 16
+	cld
+.l0:
+	lodsb
+	stosb
+	loop .l0
+
+	; restore flat address
+	pop eax
+	; dump flat address
+
+	mov ds, bx
+	call putint
+
+	; dump row
+	mov cx, 16
+	mov si, row_buf
+.l1:
+	push si
+	mov al, ' '
+	call putc
+	pop si
+	cld
+	lodsb
+	push si
+	call putbyte
+	pop si
+	loop .l1
+	mov si, str_lf
+	call puts
+
+	ret
 
 str_text:
 	db 'EAX=%X EBX=%X ECX=%X EDX=%X CS=%H DS=%H ES=%H', 0xd, 0xa
 	db 'ESI=%X EDI=%X EBP=%X ESP=%X FS=%H GS=%H SS=%H', 0xd, 0xa, 0
 str_text2:
-	db 'EIP=%X [%s]', 0xd, 0xa, 0
+	db 'EIP=%X [%s]'
+str_lf:
+	db 0xd, 0xa, 0
 
 str_flags1:
 	db 'VR?NPLODITSZ?A?P1C', 0
 str_flags0:
 	db '--0---------0-0-!-', 0
+
+str_dbg_loop:
+	db 'panic: loop', 0xd, 0xa, 0
 
 	times MON_SIZE - 2 - ($ - $$) db 0
 mon_sig:
@@ -522,6 +652,14 @@ mon_sig:
 ; old EIP for dumping processor state
 eip_old:
 	dd 0xcafebabe
+cs_old:
+	dw 0xdead
+sp_old:
+	dw 0
+dbg_state:
+	db 0
 ; flags scratch buffer
 str_flags:
 	db '                  ', 0
+row_buf:
+	times 16 db 0
