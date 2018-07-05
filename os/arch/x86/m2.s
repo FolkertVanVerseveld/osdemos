@@ -16,6 +16,8 @@
 %define PROG_ADDR 0x7c00
 %define STACK_ADDR PROG_ADDR
 
+; NOTE make sure this is after `mon_sig', because
+;      it will be overwritten while loading part2!
 %define DBG_ADDR_TMP 0x8000
 %define DBG_ADDR     0x0800
 
@@ -122,7 +124,7 @@ init:
 	int3 ; db 0xcc
 	jmp part2
 
-dump:
+dump_state:
 	push eax
 	push ds
 
@@ -135,21 +137,19 @@ dump:
 	pop ds
 	pop eax
 
-	jmp _dump
-
-; dump processor state
+; dump_state processor state
 ; all registers are preserved
-_dump:
+_dump_state:
 	push ds
 	push es
 
 	; prepare all arguments for dumping
 	pushfd
 	pushad
-	; make it easier to grab eflags later (see line 183)
+	; make it easier to grab eflags later (see line 179)
 	pushfd
 
-_dump2:
+_dump_state2:
 	push ss
 	push gs
 	push fs
@@ -174,13 +174,25 @@ _dump2:
 
 	; we have dumped all gpr and segment registers
 	; so we can thrash them without worrying about them
+
+	; grab eflags (see line 150)
+	pop edx
+
+	call dump_eip_flags
+
+	popad
+	popfd
+
+	pop es
+	pop ds
+
+	ret
+
+dump_eip_flags:
 	mov bx, str_flags0
 	mov si, str_flags1
 	; eflags has 18 fields (including preserved bits)
 	mov cx, 18
-
-	; grab eflags (see line 150)
-	pop edx
 
 	mov ebp, 0x00040000
 
@@ -199,9 +211,10 @@ _dump2:
 	jz .z
 	pop bx
 
+	; increment both ptrs
 	stosb
-
 	inc bx
+
 	loop .l
 	jmp .done
 .z:
@@ -209,13 +222,15 @@ _dump2:
 
 	mov al, [bx]
 
+	; increment both ptrs
 	stosb
-
 	inc bx
+
 	loop .l
 
 .done:
-	xor ax, ax
+	; zero terminate
+	mov al, 0
 	stosb
 
 	push str_flags
@@ -224,13 +239,8 @@ _dump2:
 	mov si, str_text2
 	call printf
 
-	popad
-	popfd
-
-	pop es
-	pop ds
-
 	ret
+
 
 ; simplistic real mode printf
 ; format string in $si
@@ -321,9 +331,7 @@ printf:
 .puts:
 	push si
 	mov si, [bp]
-	push bp
 	call puts
-	pop bp
 	add bp, 2
 	pop si
 	jmp .floop
@@ -365,8 +373,10 @@ putnyb:
 .1:
 	add al, '0'
 putc:
+	pusha
 	mov ah, 0xe
 	int 10h
+	popa
 	ret
 _puts_loop:
 	call putc
@@ -386,116 +396,24 @@ tries:
 	dw 0xaa55
 
 part2:
-	; TODO dump initial program state
-
-	;push ds
-	;mov si, word [sp_old]
-	;mov ax, DBG_ADDR_TMP / 16
-	;mov ds, ax
-	;int3
-	;jmp hang
-	;;mov ax, 0xffff
-	;;mov ds, ax
-	;;mov si, 0
-	;call dump_row
-	;pop ds
+	; TODO dump_state initial program state
+	mov si, word [sp_old]
+	mov bx, DBG_ADDR_TMP / 16
+	mov ds, bx
 
 	int3
 
+	;call _dump_state
+	; TODO get command
+	cli
+	jmp $
+
 	; scroll down test
-.l:
-	mov ah, 0
-	int 16h
-	cmp ah, 0x50
-	je .down
-	cmp ah, 0x48
-	je .up
-	cmp ah, 0x4b
-	je .left
-	cmp ah, 0x4d
-	je .right
-	jmp .l
-.down:
-	; save cursor
-	call get_cursor
-	cmp dh, 25 - 1
-	jae .sdown
-	; move down
-	add dh, 1 ; increment row
-	jmp .set
-
-.sdown:
-	mov dh, 25 - 1
-	mov ah, 2
-	mov bh, 0
-	int 10h
-	; scroll all rows up (i.e. 25 rows)
-	mov ax, 0x0601 ; al = lines
-	mov bh, 7 ; light gray
-	xor cx, cx
-	mov dx, 0x1850 ; 24 rows, 80 columns
-	int 10h
-	jmp .l
-.up:
-	; save cursor
-	call get_cursor
-	cmp dh, 0
-	je .sup
-	dec dh
-	jmp .set
-
-.sup:
-	; scroll all rows up (i.e. 25 rows)
-	mov ax, 0x0701 ; al = lines
-	mov bh, 7 ; light gray
-	xor cx, cx
-	mov dx, 0x1850 ; 24 rows, 80 columns
-	int 10h
-	jmp .l
-
-.left:
-	call get_cursor
-	cmp dl, 0
-	je .wleft
-	dec dl
-	jmp .set
-.wleft:
-	mov dl, 80 - 1
-	dec dh
-	jns .set
-	mov dh, 0
-	call set_cursor
-	jmp .sup
-.set:
-	call set_cursor
-	jmp .l
-
-.right:
-	call get_cursor
-	inc dl
-	cmp dl, 80
-	jne .set
-.wright:
-	mov dl, 0
-	inc dh
-	cmp dh, 25 - 2
-	ja .sdown
-	jmp .set
-
-get_cursor:
-	mov ah, 3
-	mov bh, 0
-	int 10h
-	ret
-set_cursor:
-	mov ah, 2
-	mov bh, 0
-	int 10h
-	ret
 
 ; core debug handler
-; this is the most important part of the whole program it dumps the
-; current processor state and allows one to invoke commands. e.g.:
+; this is the most important part of the whole program. it dumps the
+; current processor state.
+; we still have to implement the following commands.:
 ; modify memory, dump memory, jump to address, dissassemble code
 ;
 ; note that flags is already pushed on the stack: so pushf ... popf are
@@ -506,7 +424,6 @@ dbg:
 	push es
 
 	; figure out EIP
-	; FIXME figure out cs
 	pushfd
 	push eax
 	xor eax, eax
@@ -518,6 +435,7 @@ dbg:
 	mov ax, word [bx + 46]
 	; upper half is zero (see line xor eax, eax)
 	mov dword [eip_old], eax
+	; figure out cs
 	mov ax, word [bx + 48]
 	mov word [cs_old], ax
 	pop bx
@@ -538,7 +456,7 @@ dbg:
 	pop es
 	pop ds
 
-	call _dump
+	call _dump_state
 
 	; finish debug handler
 	mov al, byte [dbg_state]
@@ -551,7 +469,7 @@ dbg:
 	mov ax, word [cs_old]
 	mov ds, ax
 	mov si, word [eip_old]
-	call dump_row
+	call dump_state_row
 
 	pop ds
 
@@ -580,7 +498,7 @@ hcf:
 	hlt
 	jmp .hang
 
-dump_row:
+dump_state_row:
 	; convert ds:si to flat address
 	xor eax, eax
 	mov ax, ds
@@ -610,22 +528,28 @@ dump_row:
 	mov ds, bx
 	call putint
 
-	; dump row
+	; dump row and ascii stuff
 	mov cx, 16
 	mov si, row_buf
-.l1:
+
 	push si
+.l1:
 	mov al, ' '
 	call putc
-	pop si
 	cld
 	lodsb
-	push si
 	call putbyte
-	pop si
 	loop .l1
 	mov si, str_lf
 	call puts
+
+	pop si
+	mov cx, 16
+.l2:
+	loop .l2
+
+	push si
+	pop si
 
 	ret
 
