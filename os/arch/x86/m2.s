@@ -396,17 +396,80 @@ tries:
 	dw 0xaa55
 
 part2:
-	; TODO dump_state initial program state
-	mov si, word [sp_old]
+	; dump_state initial program state
+	; save eip
+	xor eax, eax
+	mov ax, PROG_ADDR
+	mov dword [eip_old], eax
+
+	; figure out stack
+	mov bp, word [sp_old]
 	mov bx, DBG_ADDR_TMP / 16
 	mov ds, bx
 
-	int3
+	; debug stuff layout:
+	;  0 gs
+	;  2 fs
+	;  4 es
+	;  6 ds
+	;  8 cs
+	; 10 edi
+	; 14 esi
+	; 18 ebp
+	; 22 esp
+	; 26 ebx
+	; 30 edx
+	; 34 ecx
+	; 38 eax
+	; 42 eflags
+	xor ax, ax
+	push ax                ; ss = 0, because we trashed it in `reset'
+	mov  ax,  [ds:bp + 0]
+	push ax                ; push gs
+	mov  ax,  [ds:bp + 2]
+	push ax                ; push fs
+	mov  eax, [ds:bp + 22]
+	add  eax, byte 4
+	push eax               ; push esp
+	mov  eax, [ds:bp + 18]
+	push eax               ; push ebp
+	mov  eax, [ds:bp + 10]
+	push eax               ; push edi
+	mov  eax, [ds:bp + 14]
+	push eax               ; push esi
+	mov  ax,  [ds:bp + 4]
+	push ax                ; push es
+	mov  ax,  [ds:bp + 6]
+	push ax                ; push ds
+	mov  ax,  [ds:bp + 8]
+	push ax                ; push cs
+	mov  eax, [ds:bp + 30]
+	push eax               ; push edx
+	mov  eax, [ds:bp + 34]
+	push eax               ; push ecx
+	mov  eax, [ds:bp + 26]
+	push eax               ; push ebx
+	mov  eax, [ds:bp + 38]
+	push eax               ; push eax
+
+	mov edx, [ds:bp + 42]  ; grab eflags
+
+	xor ax, ax
+	mov ds, ax
+	mov es, ax
+	mov si, str_text
+	mov dword [flags_old], edx ; save eflags
+	call printf
+
+	; restore eflags
+	xor ax, ax
+	mov ds, ax
+	mov edx, dword [flags_old]
+	call dump_eip_flags
 
 	;call _dump_state
 	; TODO get command
-	cli
-	jmp $
+	jmp hang
 
 	; scroll down test
 
@@ -582,6 +645,8 @@ sp_old:
 	dw 0
 dbg_state:
 	db 0
+flags_old:
+	dd 0
 ; flags scratch buffer
 str_flags:
 	db '                  ', 0
