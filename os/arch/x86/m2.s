@@ -50,7 +50,7 @@ reset:
 start:
 	push fs
 	push gs
-	; everything has been safed
+	; everything has been saved
 	; setup a proper environment
 	cli
 	mov bx, sp
@@ -140,7 +140,7 @@ _dump_state:
 	; prepare all arguments for dumping
 	pushfd
 	pushad
-	; make it easier to grab eflags later (see line 179)
+	; make it easier to grab eflags later (see line 173)
 	pushfd
 
 _dump_state2:
@@ -169,7 +169,7 @@ _dump_state2:
 	; we have dumped all gpr and segment registers
 	; so we can thrash them without worrying about them
 
-	; grab eflags (see line 150)
+	; grab eflags (see line 144)
 	pop edx
 
 	call dump_eip_flags
@@ -474,6 +474,8 @@ part2:
 	call dump_eip_flags
 
 	int3
+; `jmp mon' would be sufficient, but just in case it
+; may save the user's butt when corrupting the stack
 .loop:
 	call mon
 	jmp .loop
@@ -572,7 +574,8 @@ mon:
 	mov ah, 0
 	int 16h
 	cmp al, 'm'
-	je .dump
+	jnz $ + 5
+	call dump
 	cmp al, 'g'
 	jz go
 
@@ -586,71 +589,151 @@ mon:
 	cmp al, 'c'
 	je .done
 
-	jmp .input
-.dump:
+	jmp mon
+.done:
+	call putc
+	jmp putln
+
+dump:
 	; get address
 	call read_word
+	pop ax
+	mov word [dump_seg], ax
+	push ax
 	mov al, ':'
 	call read_word
-	mov al, '*'
-	call put_key
-	call get_byte
+	pop ax
+	mov word [dump_off], ax
+	push ax
+	; stack: si ds
+dump2:
 	pop si
 	pop ds
-	; if count is 0 use 0x100
-	cmp al, 0
-	jnz .skip
-	mov cx, 0x100
-	jmp .loop
-.skip:
-	mov cl, al
-	mov ch, 0
-; dump memory
+	call dump_row
+
+	; wait for input, unknown keys will terminate the command
+	xor ax, ax
+	mov ds, ax
+	mov ah, 0
+	int 16h
+	; just print it for now
+	; down: ah = 0x50, al = 0x00
+	; up  : ah = 0x48, al = 0x00
+	;call putshort
+	cmp ah, 0x50
+	je .down
+	cmp ah, 0x48
+	je .up
+
+	ret
+
+.down:
+	mov ax, word [dump_off]
+	add ax, byte 16
+	mov word [dump_off], ax
+	call putln
+	jmp .next
+.up:
+	mov ax, word [dump_off]
+	sub ax, byte 16
+	mov word [dump_off], ax
+	; fetch cursor location
+	mov ah, 3
+	mov bh, 0
+	int 10h
+	; scroll up if on first row
+	cmp dh, 0
+	jnz .noscroll
+
+	mov ax, 0x0701
+	mov bh, 7
+	xor cx, cx
+	mov dh, 24
+	mov dl, 79
+	int 10h
+	jmp .next
+
+.noscroll:
+	; update cursor
+	dec dh
+	mov ah, 2
+	mov bh, 0
+	int 10h
+
+.next:
+	; fetch new row
+	mov ax, word [dump_seg]
+	push ax
+	mov ax, word [dump_off]
+	push ax
+	jmp dump2
+
+dump_off:
+	dd 0xdead
+dump_seg:
+	dd 0xbeef
+
+dump_row:
+	; reposition cursor
+	push ds
+	push si
+
+	; grab cursor line
+	mov ah, 3
+	mov bh, 0
+	int 10h
+	; update cursor line
+	mov dl, 2
+	mov ah, 2
+	int 10h
+
+	pop si
+	pop ds
+
+	; (re)print address
+	push si
+	push ds
+
+	; push arguments
+	push si
+	push ds
+	xor ax, ax
+	mov ds, ax
+	mov si, str_flat
+	call printf
+
+	pop ds
+	pop si
+
+	; dump row
+	mov cx, 16
 .loop:
 	push cx
+
+	; print separator
 	push ds
 	push si
 	mov al, ' '
 	call putc
 	pop si
 	pop ds
+
+	; fetch byte
 	cld
 	lodsb
+
+	; dump byte
 	push ds
 	push si
-
-	push ax
-	; put newline for each 16 bytes
-	mov al, byte [es:.cnt]
-	cmp al, 15
-	jnz .skip2
-	xor ax, ax
-	mov ds, ax
-	call putln
-	mov al, 0
-	mov byte [es:.cnt], al
-	jmp .skip3
-.skip2:
-	inc byte [es:.cnt]
-.skip3:
-	pop ax
-
 	call putbyte
-
 	pop si
 	pop ds
-	pop cx
 
+	pop cx
 	loop .loop
-	; restore counter
-	mov al, 15
-	mov byte [es:.cnt], al
-	jmp mon
-.cnt:
-	db 15
-.done:
-	call putc
-	jmp putln
+
+	ret
+
 ; jump to specified address. e.g.: g 07c0:0000
 ; restarts the program
 go:
@@ -665,6 +748,8 @@ go:
 	jmp .lbl
 .lbl:
 	jmp 0:start
+
+; user input routines
 
 ; equivalent as if we have inlined the following:
 ;   call put_key
