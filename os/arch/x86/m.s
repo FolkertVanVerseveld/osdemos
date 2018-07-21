@@ -128,6 +128,8 @@ dump:
 	mov al, byte [es:cnt]
 	cmp al, 15
 	jnz .skip2
+	xor ax, ax
+	mov ds, ax
 	call putln
 	mov al, 0
 	mov byte [es:cnt], al

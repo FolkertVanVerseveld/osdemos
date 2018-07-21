@@ -18,14 +18,14 @@
 
 ; NOTE make sure this is after `mon_sig', because
 ;      it will be overwritten while loading part2!
-%define DBG_ADDR_TMP 0x8000
+%define DBG_ADDR_TMP 0x8200
 %define DBG_ADDR     0x0800
 
 ; number of retries before giving up
 %define DRIVE_TRIES 5
-%define DRIVE_SECTORS 1
+%define DRIVE_SECTORS 2
 
-%define MON_SIZE 1024
+%define MON_SIZE (512 + DRIVE_SECTORS * 512)
 %define MON_SIG 0x1337
 
 bits 16
@@ -116,12 +116,6 @@ init:
 	mov ax, 0x0003
 	int 10h
 
-	; TODO dump initial program state
-
-	; dump twice to check nothing gets thrashed
-	; (except EIP is different of course)
-	int3 ; db 0xcc
-	int3 ; db 0xcc
 	jmp part2
 
 dump_state:
@@ -240,7 +234,6 @@ dump_eip_flags:
 	call printf
 
 	ret
-
 
 ; simplistic real mode printf
 ; format string in $si
@@ -386,6 +379,12 @@ puts:
 	cmp al, 0
 	jne _puts_loop
 	ret
+put_key:
+	mov ah, 0xe
+	int 10h
+	mov al, ' '
+	int 10h
+	ret
 
 ; I/O data
 drive:
@@ -396,6 +395,13 @@ tries:
 	dw 0xaa55
 
 part2:
+	; dump initial program state
+
+	; dump twice to check nothing gets thrashed
+	; (except EIP is different of course)
+	;int3 ; db 0xcc
+	;int3 ; db 0xcc
+
 	; dump_state initial program state
 	; save eip
 	xor eax, eax
@@ -467,17 +473,18 @@ part2:
 	mov edx, dword [flags_old]
 	call dump_eip_flags
 
-	;call _dump_state
-	; TODO get command
-	jmp hang
-
-	; scroll down test
+	int3
+.loop:
+	call mon
+	jmp .loop
 
 ; core debug handler
 ; this is the most important part of the whole program. it dumps the
 ; current processor state.
+; it assumes it is called from int3 (db 0xcc)
 ; we still have to implement the following commands.:
 ; modify memory, dump memory, jump to address, dissassemble code
+; continue...
 ;
 ; note that flags is already pushed on the stack: so pushf ... popf are
 ; not necessary.
@@ -521,29 +528,204 @@ dbg:
 
 	call _dump_state
 
+	push ds
+	push es
+
+	xor ax, ax
+	mov ds, ax
+	mov es, ax
+
 	; finish debug handler
 	mov al, byte [dbg_state]
 	and al, 0xfe
 	mov byte [dbg_state], al
 
 	; dump first row where cs:ip points to
-	push ds
 
 	mov ax, word [cs_old]
+	mov si, word [ds:eip_old]
 	mov ds, ax
-	mov si, word [eip_old]
 	call dump_state_row
 
+	; start monitor and wait for continue
+	call mon
+dbg_ret:
+
+	; restore stuff
+	pop es
 	pop ds
-
-	; FIXME write custom keyboard driver
-	; wait for key press
-	;mov ah, 0
-	;int 16h
-
 	popad
 
 	iretw
+
+mon:
+	; FIXME write custom keyboard driver
+	; FIXME interrupts are disabled, so int 16h doesn't
+	; work on real hardware (except for a super bios?)
+	xor ax, ax
+	mov ds, ax
+	mov es, ax
+	call putln
+
+.input:
+	; wait for key press
+	mov ah, 0
+	int 16h
+	cmp al, 'm'
+	je .dump
+	cmp al, 'g'
+	jz go
+
+	; check if debug handler is running
+	pop bx
+	push bx
+	cmp bx, dbg_ret
+	jne .input
+
+	; these commands are only available if invoked via int3
+	cmp al, 'c'
+	je .done
+
+	jmp .input
+.dump:
+	; get address
+	call read_word
+	mov al, ':'
+	call read_word
+	mov al, '*'
+	call put_key
+	call get_byte
+	pop si
+	pop ds
+	; if count is 0 use 0x100
+	cmp al, 0
+	jnz .skip
+	mov cx, 0x100
+	jmp .loop
+.skip:
+	mov cl, al
+	mov ch, 0
+; dump memory
+.loop:
+	push cx
+	push ds
+	push si
+	mov al, ' '
+	call putc
+	pop si
+	pop ds
+	cld
+	lodsb
+	push ds
+	push si
+
+	push ax
+	; put newline for each 16 bytes
+	mov al, byte [es:.cnt]
+	cmp al, 15
+	jnz .skip2
+	xor ax, ax
+	mov ds, ax
+	call putln
+	mov al, 0
+	mov byte [es:.cnt], al
+	jmp .skip3
+.skip2:
+	inc byte [es:.cnt]
+.skip3:
+	pop ax
+
+	call putbyte
+
+	pop si
+	pop ds
+	pop cx
+
+	loop .loop
+	; restore counter
+	mov al, 15
+	mov byte [es:.cnt], al
+	jmp mon
+.cnt:
+	db 15
+.done:
+	call putc
+	jmp putln
+; jump to specified address. e.g.: g 07c0:0000
+; restarts the program
+go:
+	call put_key
+	call get_word
+	mov word [es:.lbl + 3], ax
+	mov al, ':'
+	call put_key
+	call get_word
+	mov word [es:.lbl + 1], ax
+	; trash pipeline
+	jmp .lbl
+.lbl:
+	jmp 0:start
+
+; equivalent as if we have inlined the following:
+;   call put_key
+;   call get_word
+;   push ax
+read_word:
+	call put_key
+	call get_word
+	pop bx
+	push ax
+	jmp bx
+
+; text input routines
+get_word:
+	call get_byte
+	mov ah, al
+	push ax
+	call get_byte
+	pop bx
+	mov ah, bh
+	ret
+get_byte:
+	call get_nibble
+	shl ax, byte 4
+	push ax
+	call get_nibble
+	pop bx
+	add al, bl
+	ret
+; ask user input for one xdigit
+; and also print it on screen
+get_nibble:
+	call get_xdigit
+	push ax
+	mov al, bl
+	mov ah, 0xe
+	int 10h
+	pop ax
+	ret
+get_xdigit:
+	mov ah, 0
+	int 16h
+	mov bl, al
+	cmp al, ' '
+	jne .1
+	jmp mon ;jmp 0:reset
+.1:
+	cmp al, '0'
+	jb get_xdigit
+	cmp al, '9'
+	jg .2
+	sub al, '0'
+	ret
+.2:
+	cmp al, 'a'
+	jb get_xdigit
+	cmp al, 'f'
+	ja get_xdigit
+	sub al, 'a' - 10
+	ret
+
 ; generic panic method
 hcf:
 	; just to make sure we have a proper environment
@@ -572,6 +754,7 @@ dump_state_row:
 .s:
 	; save for dumping flat address
 	push eax
+	push si
 
 	; fetch row
 	xor bx, bx
@@ -585,11 +768,14 @@ dump_state_row:
 	loop .l0
 
 	; restore flat address
+	pop si
 	pop eax
 	; dump flat address
-
+	push si
+	push ds
+	mov si, str_flat
 	mov ds, bx
-	call putint
+	call printf
 
 	; dump row and ascii stuff
 	mov cx, 16
@@ -603,17 +789,34 @@ dump_state_row:
 	lodsb
 	call putbyte
 	loop .l1
-	mov si, str_lf
-	call puts
+
+	mov al, ' '
+	call putc
 
 	pop si
+	; print ascii stuff
 	mov cx, 16
 .l2:
+	cld
+	lodsb
+	cmp al, 0xd
+	ja .p
+	mov al, '?'
+.p:
+	push si
+	push cx
+	call putc
+	pop cx
+	pop si
 	loop .l2
 
-	push si
-	pop si
+	call putln
 
+	ret
+
+putln:
+	mov si, str_lf
+	call puts
 	ret
 
 str_text:
@@ -631,6 +834,9 @@ str_flags0:
 
 str_dbg_loop:
 	db 'panic: loop', 0xd, 0xa, 0
+
+str_flat:
+	db '%H:%H', 0
 
 	times MON_SIZE - 2 - ($ - $$) db 0
 mon_sig:
