@@ -117,11 +117,15 @@ init:
 
 	call ssp_load
 
-	jmp hang
+die:
+	mov ax, 0x0e00 + '!'
+	mov bp, 10h
+	call bioscall
+	hlt
+	jmp die
 
 ; dump initial processor state
 dump_ips:
-	; TODO dump initial program state
 	; data is somewhere in segment 0x8200
 	; qemu has sp=0x6efe
 	; which means data starts at: 0x8200 + 0x6efe = 0xf0fe
@@ -139,39 +143,51 @@ dump_ips:
 	; 22: ecx
 	; 26: eax
 	; 2A: eflags
-	mov si, word [sp_old]
-	push DBG_ADDR_TMP / 16
-	pop es
 
-	; print
-	; EAX EBX ECX EDX ESI EDI EBP ESP
-	; CS DS ES FS GS SS
-	mov eax, dword [es:si + 0x26]
+	; print format:
+	; EAX ECX EDX EBX ESP EBP ESI EDI
+	; CS DS ES FS GS EFLAGS
+	mov si, [sp_old]
+	add si, 0x26
+	push word DBG_ADDR_TMP / 16
+	pop ds
+
+	std
+	mov cx, 8
+.l:
+	lodsd
 	call putint_sp
-	mov eax, dword [es:si + 0x1A]
+	loop .l
+	mov cx, 5
+
+	call putlf
+
+.l2:
+	lodsw
+	call putshort_sp
+	loop .l2
+	mov eax, dword [si + 0x2e]
 	call putint_sp
-	mov eax, dword [es:si + 0x22]
-	call putint_sp
-	mov eax, dword [es:si + 0x1E]
-	call putint_sp
-	mov eax, dword [es:si + 0x0E]
-	call putint_sp
-	mov eax, dword [es:si + 0x0A]
-	call putint_sp
-	mov eax, dword [es:si + 0x12]
-	call putint_sp
-	mov eax, dword [es:si + 0x16]
-	call putint_sp
-	mov si, str_lf
-	call puts
+
+	call putlf
 
 	push word 0
-	pop es
+	pop ds
 
 	ret
 
+putlf:
+	mov al, 0xd
+	call putchar
+	mov al, 0xa
+	jmp putchar
+
 putint_sp:
 	call putint
+	mov al, ' '
+	jmp putchar
+putshort_sp:
+	call putshort
 	mov al, ' '
 	jmp putchar
 
@@ -288,22 +304,25 @@ bioscall:
 	pushad
 	pushfd
 
+	push ds
+	push word 0
+	pop ds
+
 	; save ss:sp, modify restore code
 	mov word [bc_ax + 1], ax
 	push ss
 	pop ax
 	mov word [bc_ss + 1], ax
+	add sp, 2
 	mov word [bc_sp + 1], sp
+	sub sp, 2
 	; self modify interrupt vector
-	push ds
 
-	push word 0
-	pop ds
 	mov ax, bp
 	mov byte [bc_int + 1], al
 
-	pop ds
 	; all set! but pipeline is dirty
+	pop ds
 	jmp bc_ax
 bc_ax:
 	mov ax, word 0x0bad
