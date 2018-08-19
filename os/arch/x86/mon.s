@@ -1,6 +1,7 @@
 ; copyright folkert van verseveld. all rights reserved
 
 ; paranoid real mode machine code monitor
+; 80386 or better required (for pushfd etc.)
 
 ; stack starts at program start
 ; program layout:
@@ -49,6 +50,8 @@
 ; stack smashed
 %define ERR_SSP 1
 
+%define INT_BIOS_WRAPPER 0xf5
+
 bits 16
 org PROG_ADDR
 
@@ -67,8 +70,7 @@ reset:
 	; first 16 bytes of the whole program. this
 	; trick ensures that this jump is always
 	; reachable even with a bogus initial cs
-	jmp 0:start
-start:
+	jmp 0:$+5
 	push fs
 	push gs
 	; everything has been saved
@@ -84,10 +86,24 @@ start:
 	; in case the bios fucks this up
 	mov dl, byte [drive]
 	sti
-	; FIXME stub
+	; setup bios wrapper
+	cld
+	mov di, INT_BIOS_WRAPPER * 4
+	mov ax, bios_wrapper
+	stosw
+	xor ax, ax
+	stosw
+	; make sure we are in the correct video mode
+	; this also clears the screen and resets the cursor
+	mov ax, 0x0003
+	mov bp, 10h
+	int INT_BIOS_WRAPPER
 	; now load the whole monitor from disk
 	; ensure signature must be loaded from disk
 load:
+	; just in case the BIOS manages to fuck this up
+	call ssp_save
+
 	mov word [mon_sig], 0
 	mov ax, 0x0200 + DRIVE_SECTORS
 	mov cx, 0x0002
@@ -95,13 +111,16 @@ load:
 	mov dl, byte [drive]
 	mov bx, part2
 	mov bp, 13h
-	call bioscall
+	int INT_BIOS_WRAPPER
+
+	call ssp_load
+
 	; ignore return status, just check signature
 	cmp word [mon_sig], MON_SIG
 	je init
 	mov ah, 0
 	mov dl, byte [drive]
-	call bioscall
+	int INT_BIOS_WRAPPER
 	dec byte [tries]
 	cmp byte [tries], 0
 	jne load
@@ -111,18 +130,22 @@ hang:
 init:
 	; TODO setup monitor
 	; TODO install debug handler (int3)
-	call ssp_save
-
 	call dump_ips
 
-	call ssp_load
+	jmp part2
 
 die:
 	mov ax, 0x0e00 + '!'
 	mov bp, 10h
-	call bioscall
+	int INT_BIOS_WRAPPER
 	hlt
 	jmp die
+
+; interrupt handler
+; candidates: f5, f6
+bios_wrapper:
+	call bioscall
+	iretw
 
 ; dump initial processor state
 dump_ips:
@@ -188,6 +211,10 @@ putint_sp:
 	jmp putchar
 putshort_sp:
 	call putshort
+	mov al, ' '
+	jmp putchar
+putbyte_sp:
+	call putbyte
 	mov al, ' '
 	jmp putchar
 
@@ -288,7 +315,7 @@ putchar:
 	mov ah, 0xe
 	xor bx, bx
 
-	call bioscall
+	int INT_BIOS_WRAPPER
 	ret
 
 ; paranoid sandbox
@@ -313,11 +340,12 @@ bioscall:
 	push ss
 	pop ax
 	mov word [bc_ss + 1], ax
+	; we saved ds earlier, so sp is different
 	add sp, 2
 	mov word [bc_sp + 1], sp
 	sub sp, 2
-	; self modify interrupt vector
 
+	; self modify interrupt vector
 	mov ax, bp
 	mov byte [bc_int + 1], al
 
@@ -373,8 +401,43 @@ tries:
 	times 0x200 - 2 - ($ - $$) db 0
 	dw 0xaa55
 part2:
+	call get_key
+
+	mov ax, [BIOSCALL_ADDR + 0x1C]
+	cmp al, 0x6d
+	jne .1
+	call dump_mem
+	jmp part2
+.1:
+
+	call putshort
+
+	jmp part2
 
 	; TODO data
+
+get_key:
+	mov ah, 0
+	mov bp, 16h
+	int INT_BIOS_WRAPPER
+	ret
+
+dump_mem:
+	mov si, word [dm_off]
+	push word [dm_seg]
+	pop ds
+
+	mov cx, 16
+.l:
+	cld
+	lodsb
+	call putbyte_sp
+	loop .l
+	call putlf
+
+	push word 0
+	pop ds
+	ret
 
 str_panic:
 	db 0xd, 0xa, "ERR: ", 0
@@ -394,4 +457,9 @@ sp_old:
 ssp_ss:
 	dw 0
 ssp_sp:
+	dw 0
+; dump memory command
+dm_seg:
+	dw 0
+dm_off:
 	dw 0
