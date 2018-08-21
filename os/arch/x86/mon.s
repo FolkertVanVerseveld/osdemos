@@ -39,6 +39,67 @@
 ; 0x0728: eflags
 
 %define BIOSCALL_ADDR 0x0700
+%define BIOSCALL_ADDR_EAX (BIOSCALL_ADDR + 0x1C)
+%define BIOSCALL_ADDR_ECX (BIOSCALL_ADDR + 0x18)
+%define BIOSCALL_ADDR_EDX (BIOSCALL_ADDR + 0x14)
+
+; --------V-1006-------------------------------
+; INT 10 - VIDEO - SCROLL UP WINDOW
+; 	AH = 06h
+; 	AL = number of lines by which to scroll up (00h = clear entire window)
+; 	BH = attribute used to write blank lines at bottom of window
+; 	CH,CL = row,column of window's upper left corner
+; 	DH,DL = row,column of window's lower right corner
+; Return: nothing
+; Note:	affects only the currently active page (see AH=05h)
+; BUGS:	some implementations (including the original IBM PC) have a bug which
+; 	  destroys BP
+; 	the Trident TVGA8900CL (BIOS dated 1992/9/8) clears DS to 0000h when
+; 	  scrolling in an SVGA mode (800x600 or higher)
+; SeeAlso: AH=07h,AH=12h"Tandy 2000",AH=72h,AH=73h,AX=7F07h,INT 50/AX=0014h
+; --------V-1007-------------------------------
+; INT 10 - VIDEO - SCROLL DOWN WINDOW
+; 	AH = 07h
+; 	AL = number of lines by which to scroll down (00h=clear entire window)
+; 	BH = attribute used to write blank lines at top of window
+; 	CH,CL = row,column of window's upper left corner
+; 	DH,DL = row,column of window's lower right corner
+; Return: nothing
+; Note:	affects only the currently active page (see AH=05h)
+; BUGS:	some implementations (including the original IBM PC) have a bug which
+; 	  destroys BP
+; 	the Trident TVGA8900CL (BIOS dated 1992/9/8) clears DS to 0000h when
+; 	  scrolling in an SVGA mode (800x600 or higher)
+; SeeAlso: AH=06h,AH=12h"Tandy 2000",AH=72h,AH=73h,INT 50/AX=0014h
+
+; --------V-1002-------------------------------
+; INT 10 - VIDEO - SET CURSOR POSITION
+; 	AH = 02h
+; 	BH = page number
+; 	    0-3 in modes 2&3
+; 	    0-7 in modes 0&1
+; 	    0 in graphics modes
+; 	DH = row (00h is top)
+; 	DL = column (00h is left)
+; Return: nothing
+; SeeAlso: AH=03h,AH=05h,INT 60/DI=030Bh,MEM 0040h:0050h
+; --------V-1003-------------------------------
+; INT 10 - VIDEO - GET CURSOR POSITION AND SIZE
+; 	AH = 03h
+; 	BH = page number
+; 	    0-3 in modes 2&3
+; 	    0-7 in modes 0&1
+; 	    0 in graphics modes
+; Return: AX = 0000h (Phoenix BIOS)
+; 	CH = start scan line
+; 	CL = end scan line
+; 	DH = row (00h is top)
+; 	DL = column (00h is left)
+; Notes:	a separate cursor is maintained for each of up to 8 display pages
+; 	many ROM BIOSes incorrectly return the default size for a color display
+; 	  (start 06h, end 07h) when a monochrome display is attached
+; 	With PhysTechSoft's PTS ROM-DOS the BH value is ignored on entry.
+; SeeAlso: AH=01h,AH=02h,AH=12h/BL=34h,MEM 0040h:0050h,MEM 0040h:0060h
 
 ; number of retries before giving up
 %define DRIVE_TRIES 5
@@ -403,7 +464,7 @@ tries:
 part2:
 	call get_key
 
-	mov ax, [BIOSCALL_ADDR + 0x1C]
+	mov ax, [BIOSCALL_ADDR_EAX]
 	cmp al, 0x6d
 	jne .1
 	call dump_mem
@@ -423,6 +484,13 @@ get_key:
 	ret
 
 dump_mem:
+	mov ax, word [dm_seg]
+	call putshort
+	mov al, ':'
+	call putchar
+	mov ax, word[dm_off]
+	call putshort_sp
+
 	mov si, word [dm_off]
 	push word [dm_seg]
 	pop ds
@@ -433,11 +501,64 @@ dump_mem:
 	lodsb
 	call putbyte_sp
 	loop .l
-	call putlf
 
 	push word 0
 	pop ds
+
+	; wait for user input
+.w:
+	call get_key
+
+	mov ax, [BIOSCALL_ADDR_EAX]
+	cmp ah, 0x48
+
+	je .up
+
+	call putlf
 	ret
+
+.up:
+	; fetch cursor position
+	mov ah, 3
+	mov bh, 0
+	int 10h
+
+	; scroll if on first row
+	;mov dx, word [BIOSCALL_ADDR_EDX]
+	cmp dh, 0
+	jnz .2
+
+	; move cursor up by scrolling down
+	mov ah, 0x0701
+	mov bh, 7
+	xor cx, cx
+	mov dh, 25 - 1
+	mov dl, 80 - 1
+
+	int 10h
+
+	; update read ptr
+.2:
+	mov si, word [dm_off]
+	sub si, byte 16
+
+	ja .1
+	dec word [dm_seg]
+.1:
+	mov word [dm_off], si
+
+	; apply new position
+	dec dh
+	mov dl, 0
+	mov ah, 2
+	mov bh, 0
+
+	int 10h
+
+	; dump new row
+	jmp dump_mem
+.down:
+	jmp .w
 
 str_panic:
 	db 0xd, 0xa, "ERR: ", 0
