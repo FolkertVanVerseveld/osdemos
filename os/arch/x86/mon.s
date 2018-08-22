@@ -483,6 +483,11 @@ main:
 	call dump_mem
 	jmp main
 .1:
+	cmp al, 's'
+	jne .2
+	call set_addr
+	jmp main
+.2:
 
 	call putshort
 
@@ -509,6 +514,8 @@ dump_mem:
 	push word [dm_seg]
 	pop ds
 
+	push si
+
 	mov cx, 16
 .l:
 	cld
@@ -518,14 +525,19 @@ dump_mem:
 
 	; second loop
 ; FIXME check which characters produce garbled stuff
-	mov si, word [dm_off]
+	pop si
+
 	mov cx, 16
 .l2:
 	cld
 	lodsb
-	cmp al, 0xd
+	cmp al, 0x7
+	je .s
+	cmp al, 0x8
 	je .s
 	cmp al, 0xa
+	je .s
+	cmp al, 0xd
 	je .s
 	jmp .p
 .s:
@@ -562,6 +574,7 @@ dump_mem:
 
 	mov ax, word [BIOSCALL_ADDR_EAX]
 
+	; cursor movement
 	cmp ah, 0x50
 	je .down
 	cmp ah, 0x48
@@ -571,10 +584,57 @@ dump_mem:
 	cmp ah, 0x4d
 	je .right
 
-	; TODO dump mem commands
+	; poking
+	call chtoxd
+	jc .poke
 
 	call putlf
 	ret
+
+.poke:
+	mov cl, al
+
+	call putnyb
+
+.hn:
+	call get_key
+	mov ax, word [BIOSCALL_ADDR_EAX]
+
+	call chtoxd
+
+	jnc .hn
+
+	push ax
+	call putnyb
+	pop ax
+
+	shl cl, byte 4
+	add cl, al
+
+	; get ready for poking
+	push word [dm_seg]
+	pop es
+
+	mov di, word [dm_off]
+	mov bl, byte [dm_pos]
+	mov bh, 0
+	add di, bx
+	mov al, cl
+
+	cld
+	stosb
+
+	; restore state
+	push word 0
+	pop es
+
+	; increment pointer
+	mov al, byte [dm_pos]
+	inc al
+	and al, 0xf
+	mov byte [dm_pos], al
+
+	jmp .w
 
 ; advance to next row and wrap around segment
 .down:
@@ -643,7 +703,84 @@ dump_mem:
 	cmp al, 0xf
 	jna .0
 	mov al, 0xf
+
 	jmp .0
+
+set_addr:
+	call get_word_echo
+	mov word [dm_seg], ax
+
+	call get_key
+	mov ax, word [BIOSCALL_ADDR_EAX]
+
+	cmp al, ':'
+	jne .no_off
+
+	call get_word_echo
+	mov word [dm_off], ax
+
+.no_off:
+	call putlf
+	ret
+
+get_word_echo:
+	call get_byte_echo
+
+	push ax
+	call get_byte_echo
+	pop bx
+
+	mov ah, bl
+
+	ret
+
+get_byte_echo:
+	call get_nibble_echo
+
+	mov cl, al
+
+	call get_nibble_echo
+
+	shl cl, byte 4
+	add al, cl
+
+	ret
+
+get_nibble_echo:
+	call get_key
+	mov ax, word [BIOSCALL_ADDR_EAX]
+
+	call chtoxd
+	jnc get_nibble_echo
+
+	push ax
+	call putnyb
+	pop ax
+
+	ret
+
+; CHaracter to heXadecimal Digit
+chtoxd:
+	clc
+
+	; is [0-9]?
+	cmp al, '0'
+	jb .fail
+	cmp al, '9'
+	jbe .digit
+	; is [a-f]?
+	cmp al, 'a'
+	jb .fail
+	cmp al, 'f'
+	ja .fail
+
+	sub al, 'a' - '0' - 10
+
+.digit:
+	sub al, '0'
+	stc
+.fail:
+	ret
 
 str_panic:
 	db 0xd, 0xa, "ERR: ", 0
