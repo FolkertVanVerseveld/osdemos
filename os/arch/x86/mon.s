@@ -116,6 +116,11 @@
 %define TTY_ROWS 25
 %define TTY_COLS 80
 
+%macro getch 0
+	call get_key
+	mov ax, word [BIOSCALL_ADDR_EAX]
+%endmacro
+
 bits 16
 org PROG_ADDR
 
@@ -472,10 +477,29 @@ part2:
 	cld
 	rep
 	stosw
-main:
-	call get_key
 
-	mov ax, [BIOSCALL_ADDR_EAX]
+	; initialize debug handler
+	cli
+
+	; hook vector
+	mov di, 3 * 4
+	; write vector
+	mov ax, dbg
+	stosw
+	xor ax, ax
+	stosw
+
+	sti
+
+	; all stuff has been initialized
+	; now keep calling the monitor
+.l:
+	call main
+	int3
+	jmp .l
+
+main:
+	getch
 
 	; parse command
 	cmp al, 'm'
@@ -488,8 +512,17 @@ main:
 	call set_addr
 	jmp main
 .2:
+	cmp al, 'g'
+	jne .3
+	jmp go_addr
+.3:
+	cmp al, 'c'
+	jne .4
+	ret
+.4:
 
 	call putshort
+	call putlf
 
 	jmp main
 
@@ -570,9 +603,7 @@ dump_mem:
 	int INT_BIOS_WRAPPER
 
 	; wait for user input
-	call get_key
-
-	mov ax, word [BIOSCALL_ADDR_EAX]
+	getch
 
 	; cursor movement
 	cmp ah, 0x50
@@ -597,8 +628,7 @@ dump_mem:
 	call putnyb
 
 .hn:
-	call get_key
-	mov ax, word [BIOSCALL_ADDR_EAX]
+	getch
 
 	call chtoxd
 
@@ -710,18 +740,31 @@ set_addr:
 	call get_word_echo
 	mov word [dm_seg], ax
 
-	call get_key
-	mov ax, word [BIOSCALL_ADDR_EAX]
+	getch
 
 	cmp al, ':'
 	jne .no_off
 
+	call putchar
 	call get_word_echo
 	mov word [dm_off], ax
 
 .no_off:
 	call putlf
 	ret
+
+go_addr:
+	call get_word_echo
+	mov word [.jmp + 3], ax
+
+	mov al, ':'
+	call putchar
+
+	call get_word_echo
+	mov word [.jmp + 1], ax
+	jmp .jmp
+.jmp:
+	jmp 0xffff:0
 
 get_word_echo:
 	call get_byte_echo
@@ -747,8 +790,7 @@ get_byte_echo:
 	ret
 
 get_nibble_echo:
-	call get_key
-	mov ax, word [BIOSCALL_ADDR_EAX]
+	getch
 
 	call chtoxd
 	jnc get_nibble_echo
@@ -756,6 +798,45 @@ get_nibble_echo:
 	push ax
 	call putnyb
 	pop ax
+
+	ret
+
+dbg:
+	; push in same order as initial setup
+	; so we can dump them in the same format
+	pushfd
+
+	push di
+	mov di, 0xffff
+
+	call dump_ps
+
+	pop di
+
+	popfd
+	iretw
+
+dump_ps:
+	pushfd
+	pushad
+
+;             EDI           ESI           EBP           ESP
+; 00007bce: 0xffff 0x0000 0x6efa 0x0000 0x0016 0x0000 0x7bee 0x0000
+;             EBX           EDX           ECX           EAX
+; 00007bde: 0x0000 0x0000 0x000a 0x0000 0x0000 0x0000 0x2e63 0x0000
+
+	mov bp, sp
+	mov cx, 8
+.l:
+	mov eax, dword [bp]
+	add bp, 4
+	push bp
+	call putint_sp
+	pop bp
+	loop .l
+
+	popad
+	popfd
 
 	ret
 
