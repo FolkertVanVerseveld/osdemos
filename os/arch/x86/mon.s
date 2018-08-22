@@ -113,6 +113,9 @@
 
 %define INT_BIOS_WRAPPER 0xf5
 
+%define TTY_ROWS 25
+%define TTY_COLS 80
+
 bits 16
 org PROG_ADDR
 
@@ -465,7 +468,9 @@ part2:
 	call get_key
 
 	mov ax, [BIOSCALL_ADDR_EAX]
-	cmp al, 0x6d
+
+	; parse command
+	cmp al, 'm'
 	jne .1
 	call dump_mem
 	jmp part2
@@ -491,6 +496,7 @@ dump_mem:
 	mov ax, word[dm_off]
 	call putshort_sp
 
+	; first loop
 	mov si, word [dm_off]
 	push word [dm_seg]
 	pop ds
@@ -502,6 +508,25 @@ dump_mem:
 	call putbyte_sp
 	loop .l
 
+	; second loop
+; FIXME check which characters produce garbled stuff
+	mov si, word [dm_off]
+	mov cx, 16
+.l2:
+	cld
+	lodsb
+	cmp al, 0xd
+	je .s
+	cmp al, 0xa
+	je .s
+	jmp .p
+.s:
+	mov al, '?'
+.p:
+	call putchar
+	loop .l2
+
+	; restore state
 	push word 0
 	pop ds
 
@@ -509,56 +534,68 @@ dump_mem:
 .w:
 	call get_key
 
-	mov ax, [BIOSCALL_ADDR_EAX]
-	cmp ah, 0x48
+	mov ax, word [BIOSCALL_ADDR_EAX]
 
+	cmp ah, 0x50
+	je .down
+	cmp ah, 0x48
 	je .up
+
+	; TODO dump mem commands
 
 	call putlf
 	ret
 
+; advance to next row and wrap around segment
+.down:
+	call putlf
+
+	add word [dm_off], byte 16
+
+	jmp dump_mem
+
 .up:
-	; fetch cursor position
 	mov ah, 3
 	mov bh, 0
-	int 10h
+	mov bp, 10h
 
-	; scroll if on first row
-	;mov dx, word [BIOSCALL_ADDR_EDX]
+	int INT_BIOS_WRAPPER
+
+	mov dx, word [BIOSCALL_ADDR_EDX]
+	; don't scroll if not in first row
 	cmp dh, 0
-	jnz .2
+	ja .1
 
-	; move cursor up by scrolling down
-	mov ah, 0x0701
+	; scroll down
+	mov ah, 7
+	mov al, 1
 	mov bh, 7
 	xor cx, cx
-	mov dh, 25 - 1
-	mov dl, 80 - 1
+	mov dh, TTY_ROWS - 1
+	mov dl, TTY_COLS - 1
 
-	int 10h
+	int INT_BIOS_WRAPPER
 
-	; update read ptr
-.2:
-	mov si, word [dm_off]
-	sub si, byte 16
+	; reset cursor position
+	mov ah, 2
+	mov bh, 0
+	xor dx, dx
+	xor cx, cx
 
-	ja .1
-	dec word [dm_seg]
+	jmp .2
+
+	; update cursor position
 .1:
-	mov word [dm_off], si
-
-	; apply new position
 	dec dh
 	mov dl, 0
 	mov ah, 2
-	mov bh, 0
 
-	int 10h
+.2:
+	int INT_BIOS_WRAPPER
 
-	; dump new row
+	sub word [dm_off], byte 16
+
 	jmp dump_mem
-.down:
-	jmp .w
 
 str_panic:
 	db 0xd, 0xa, "ERR: ", 0
