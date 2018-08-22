@@ -465,6 +465,14 @@ tries:
 	times 0x200 - 2 - ($ - $$) db 0
 	dw 0xaa55
 part2:
+	; initialize memory data
+	xor ax, ax
+	mov di, ssp_ss
+	mov cx, 256
+	cld
+	rep
+	stosw
+main:
 	call get_key
 
 	mov ax, [BIOSCALL_ADDR_EAX]
@@ -473,12 +481,12 @@ part2:
 	cmp al, 'm'
 	jne .1
 	call dump_mem
-	jmp part2
+	jmp main
 .1:
 
 	call putshort
 
-	jmp part2
+	jmp main
 
 	; TODO data
 
@@ -530,8 +538,26 @@ dump_mem:
 	push word 0
 	pop ds
 
-	; wait for user input
 .w:
+	; reposition cursor
+	mov al, byte [dm_pos]
+	mov bl, 3
+	mul bl
+	mov cx, ax
+	add cl, 10
+
+	mov ah, 3
+	mov bh, 0
+	mov bp, 10h
+	int INT_BIOS_WRAPPER
+
+	mov dx, word [BIOSCALL_ADDR_EDX]
+	mov dl, cl
+
+	mov ah, 2
+	int INT_BIOS_WRAPPER
+
+	; wait for user input
 	call get_key
 
 	mov ax, word [BIOSCALL_ADDR_EAX]
@@ -540,6 +566,10 @@ dump_mem:
 	je .down
 	cmp ah, 0x48
 	je .up
+	cmp ah, 0x4b
+	je .left
+	cmp ah, 0x4d
+	je .right
 
 	; TODO dump mem commands
 
@@ -597,6 +627,24 @@ dump_mem:
 
 	jmp dump_mem
 
+.left:
+	mov al, byte [dm_pos]
+	dec al
+	jns .0
+	mov al, 0
+.0:
+	mov byte [dm_pos], al
+
+	jmp .w
+
+.right:
+	mov al, byte [dm_pos]
+	inc al
+	cmp al, 0xf
+	jna .0
+	mov al, 0xf
+	jmp .0
+
 str_panic:
 	db 0xd, 0xa, "ERR: ", 0
 str_lf:
@@ -608,16 +656,18 @@ mon_sig:
 
 ; I/O data
 drive:
-	db 0
+	db 0x92
 sp_old:
-	dw 0
+	dw 0xeabc
 ; stack smashing protector
 ssp_ss:
-	dw 0
+	dw 0x4132
 ssp_sp:
-	dw 0
+	dw 0x9812
 ; dump memory command
 dm_seg:
-	dw 0
+	dw 0xaa78
 dm_off:
-	dw 0
+	dw 0x5513
+dm_pos:
+	db 0xfa
